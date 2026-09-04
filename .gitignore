@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+.sync-token.txt
+dist/
+outputs/
+work/
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,16 @@
+name = "tiger-scout"
+main = "worker/index.js"
+compatibility_date = "2026-06-30"
+
+[build]
+command = "npm run build:release"
+
+[assets]
+directory = "./outputs/TigerScoutRelease"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tiger-scout"
+database_id = "b393b738-a5d0-45f2-a1b2-495bbc8782a5"

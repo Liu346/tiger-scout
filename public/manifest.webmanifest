@@ -1,0 +1,19 @@
+{
+  "name": "Tiger Scout | Team 9072",
+  "short_name": "Tiger Scout",
+  "description": "Team 9072 offline FRC scouting with QR transfer",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#121416",
+  "theme_color": "#141618",
+  "icons": [
+    {
+      "src": "/public/team-9072-logo.png",
+      "sizes": "339x349",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

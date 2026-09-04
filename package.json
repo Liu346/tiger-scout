@@ -1,0 +1,27 @@
+{
+  "name": "pitlink-scout",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:sites",
+    "build:sites": "vite build --config vite.sites.config.js && node scripts/package-tiger-scout.mjs dist/client",
+    "db:generate": "drizzle-kit generate",
+    "build:release": "node scripts/package-tiger-scout.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7",
+    "idb": "^8.0.2",
+    "qr-scanner": "^1.4.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@openai/sites-vite-plugin": "^0.2.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "vite": "^8.0.0",
+    "wrangler": "^4.106.0"
+  }
+}
