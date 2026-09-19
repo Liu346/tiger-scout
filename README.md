@@ -33,6 +33,18 @@ reachable as `localhost` from an iPhone.
 4. The dataset, rankings, charts, and team match histories update locally.
 5. Export CSV for analysis or JSON for a full backup.
 
+## CRI 2026 preset
+
+The September 2026 deployment prepares each device once for the Chesapeake
+Robotics Icebreaker. It selects `CRI 2026`, saves The Blue Alliance event key
+`2026vaale1`, clears a schedule left over from a different event, and keeps all
+older scouting events intact. The home briefing includes the host's registered
+32-robot roster, tournament date, venue, and official-schedule status.
+
+CRI match sync uses the hosted `TBA_API_KEY` secret through the Site Worker, so
+scouting phones do not need or receive the API key. Browser-supplied keys remain
+available for other events, season-stat requests, and team-logo downloads.
+
 ## Fuel flow scouting
 
 AUTO and TELEOP use a 0–40 BSP (balls per second) slider with a live fuel stream.

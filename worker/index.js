@@ -65,10 +65,24 @@ async function pullRecords(request, env) {
   });
 }
 
+async function fetchCriMatches(env) {
+  if (!env.TBA_API_KEY) return json({ error: 'CRI schedule connection is not configured.' }, 503);
+  const response = await fetch('https://www.thebluealliance.com/api/v3/event/2026vaale1/matches', {
+    headers: { 'X-TBA-Auth-Key': env.TBA_API_KEY, 'Accept': 'application/json' }
+  });
+  if (!response.ok) return json({ error: `The Blue Alliance returned ${response.status}.` }, response.status);
+  const matches = await response.json();
+  return json(Array.isArray(matches) ? matches : []);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
+      if (url.pathname === '/api/tba/cri/matches' && request.method === 'GET') {
+        try { return await fetchCriMatches(env); }
+        catch { return json({ error: 'Could not reach The Blue Alliance.' }, 502); }
+      }
       if (!authorized(request, env)) return json({ error: 'Unauthorized' }, 401);
       try {
         if (url.pathname === '/api/records' && request.method === 'GET') return await pullRecords(request, env);

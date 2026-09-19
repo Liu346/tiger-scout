@@ -34,6 +34,38 @@ const dbPromise = new Promise((resolve, reject) => {
 const makeId = () => crypto.randomUUID?.() ||
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 
+const CRI_EVENT = Object.freeze({
+  id: 'cri-2026',
+  name: 'CRI 2026',
+  fullName: 'Chesapeake Robotics Icebreaker',
+  tbaKey: '2026vaale1',
+  year: '2026',
+  tournamentDate: 'Saturday, September 26',
+  showcaseDate: 'Sunday, September 27',
+  location: 'Hayfield Secondary School · Alexandria, VA',
+  teams: ['116','422','449','614','620','623','686','888','1599','1727','1731','1915','2106','2186','2199','2377','2421','2537','4099','4472','4638','5115','5243','5338','5549','5587','5830','8230','9033','9072','9072B','11415']
+});
+
+function prepareCriDevice(showToast = true) {
+  let savedEvents = [];
+  try { savedEvents = JSON.parse(localStorage.getItem('tiger-saved-events') || '[]'); } catch {}
+  const previousTbaEvent = localStorage.getItem('tiger-tba-event') || '';
+  localStorage.setItem('tiger-saved-events', JSON.stringify([...new Set([...savedEvents, CRI_EVENT.name])].sort()));
+  localStorage.setItem('tiger-selected-event', CRI_EVENT.name);
+  localStorage.setItem('tiger-last-scout-event', CRI_EVENT.name);
+  localStorage.setItem('tiger-tba-event', CRI_EVENT.tbaKey);
+  localStorage.setItem('tiger-tba-year', CRI_EVENT.year);
+  localStorage.setItem('tiger-matchprep-team', '9072');
+  localStorage.setItem('tiger-cri-preset-version', CRI_EVENT.id);
+  if (previousTbaEvent && previousTbaEvent !== CRI_EVENT.tbaKey) {
+    localStorage.removeItem('tiger-tba-schedule');
+    localStorage.removeItem('tiger-tba-last-sync');
+    localStorage.removeItem('tiger-matchprep-match');
+  }
+  draft.event = CRI_EVENT.name;
+  if (showToast) toast('CRI 2026 is selected and ready for scouting.');
+}
+
 const blank = () => ({
   id: makeId(),
   v: 3,
@@ -215,8 +247,11 @@ async function renderHome() {
   try { tigerSeason = JSON.parse(localStorage.getItem('tiger-tba-9072-season') || 'null'); } catch {}
   const scheduledTeams = [...new Set(schedule.flatMap(match => [...match.red, ...match.blue]))];
   const coveredTeams = scheduledTeams.length ? scheduledTeams.filter(team => all.some(record => String(record.team) === String(team))).length : teamRows.length;
-  const coverageTotal = scheduledTeams.length || teamRows.length;
-  const coveragePercent = coverageTotal ? Math.round(coveredTeams / coverageTotal * 100) : 0;
+  const eventRoster = selectedEvent === CRI_EVENT.name ? CRI_EVENT.teams : [];
+  const coverageTeams = scheduledTeams.length ? scheduledTeams : eventRoster;
+  const coveredTeamsForEvent = coverageTeams.length ? coverageTeams.filter(team => all.some(record => String(record.team).toUpperCase() === String(team).toUpperCase())).length : coveredTeams;
+  const coverageTotal = coverageTeams.length || teamRows.length;
+  const coveragePercent = coverageTotal ? Math.round(coveredTeamsForEvent / coverageTotal * 100) : 0;
   const syncCursor = Number(localStorage.getItem('tiger-sql-cursor') || 0);
   const unsyncedRecords = allRecords.filter(record => Number(record.createdAt || 0) > syncCursor).length;
   const lastDatabaseSync = localStorage.getItem('tiger-sql-last-sync');
@@ -241,6 +276,13 @@ async function renderHome() {
         <label>Current event<select id="homeEvent"><option value="all" ${selectedEvent==='all'?'selected':''}>All saved events</option>${events.map(event => `<option value="${escapeHtml(event)}" ${selectedEvent===event?'selected':''}>${escapeHtml(event)}</option>`).join('')}</select></label>
         <button class="primary" data-go="scout">Scout a match</button>
       </div>
+    </section>
+    <section class="cri-briefing ${selectedEvent === CRI_EVENT.name ? 'ready' : ''}">
+      <div class="cri-date"><strong>26</strong><span>SEP<br>2026</span></div>
+      <div class="cri-briefing-copy"><p class="eyebrow">${selectedEvent === CRI_EVENT.name ? 'CURRENT EVENT · READY' : 'UPCOMING EVENT'}</p><h2>${CRI_EVENT.fullName}</h2><p>${CRI_EVENT.tournamentDate} tournament · ${CRI_EVENT.showcaseDate} community showcase<br>${CRI_EVENT.location}</p></div>
+      <div class="cri-briefing-status"><strong>${CRI_EVENT.teams.length}</strong><span>registered robots</span><small>${schedule.length ? `${schedule.length} qualification matches loaded` : 'Official schedule not published yet'}</small></div>
+      <button id="prepareCri" class="${selectedEvent === CRI_EVENT.name ? 'secondary' : 'primary'}">${selectedEvent === CRI_EVENT.name ? 'Refresh CRI setup' : 'Prepare this device'}</button>
+      <details><summary>Registered team list</summary><div class="cri-team-list">${CRI_EVENT.teams.map(team => `<span class="${team.toUpperCase().startsWith('9072') ? 'ours' : ''}">${escapeHtml(team)}</span>`).join('')}</div></details>
     </section>
     <section class="tiger-spotlight">
       <div class="tiger-spotlight-brand"><img src="team-9072-logo.png" alt=""><div><p class="eyebrow">TEAM 9072 SPOTLIGHT</p><h2>TigerBots</h2><p>${escapeHtml(selectedEvent === 'all' ? 'Across all saved events' : selectedEvent)}</p></div></div>
@@ -267,7 +309,7 @@ async function renderHome() {
       </article>
       <article>
         <div class="operation-icon coverage">${coveragePercent}%</div>
-        <div><p class="eyebrow">SCOUTING COVERAGE</p><h2>${coveredTeams} of ${coverageTotal || 0} teams</h2><p>${coverageTotal ? `${Math.max(0,coverageTotal-coveredTeams)} teams still need records.` : 'Add a schedule or scouting records to measure coverage.'}</p></div>
+        <div><p class="eyebrow">SCOUTING COVERAGE</p><h2>${coveredTeamsForEvent} of ${coverageTotal || 0} teams</h2><p>${coverageTotal ? `${Math.max(0,coverageTotal-coveredTeamsForEvent)} teams still need records.` : 'Add a schedule or scouting records to measure coverage.'}</p></div>
         <button data-go="data">Readout →</button>
       </article>
       <article>
@@ -288,6 +330,10 @@ async function renderHome() {
     </section>`;
   document.querySelector('#homeEvent').onchange = event => {
     localStorage.setItem('tiger-selected-event', event.target.value);
+    renderHome();
+  };
+  document.querySelector('#prepareCri').onclick = () => {
+    prepareCriDevice();
     renderHome();
   };
   document.querySelector('#openTigerProfile')?.addEventListener('click', () => showTeam('9072', tigerRecords));
@@ -1170,6 +1216,12 @@ function renderSettings() {
   view.innerHTML = `
     <section class="pagehead"><p class="eyebrow">DEVICE SETTINGS</p><h1>Connections & assets</h1><p>Tiger Scout stays offline by default. Connect briefly to enrich records, then take the downloaded data back offline.</p></section>
     <section class="settings-grid">
+      <article class="settings-card cri-settings">
+        <div class="connection-title"><span class="connection-logo cri">CRI</span><div><h2>CRI 2026 event setup</h2><p>${CRI_EVENT.fullName}</p></div></div>
+        <p class="settings-copy"><b>${CRI_EVENT.tournamentDate}</b><br>${CRI_EVENT.location}<br>${CRI_EVENT.teams.length} registered robots, including 9072 and 9072B.</p>
+        <button id="prepareCriSettings" class="primary">Prepare this device for CRI</button>
+        <div class="sync-status ${localStorage.getItem('tiger-selected-event') === CRI_EVENT.name ? 'success' : ''}">${localStorage.getItem('tiger-selected-event') === CRI_EVENT.name ? 'CRI is the current scouting event. TBA event key is ready.' : 'Select CRI and preload its official event connection.'}</div>
+      </article>
       <article class="settings-card cloud-settings">
         <div class="connection-title"><span class="connection-logo cloud">SQL</span><div><h2>Cloud database</h2><p>Optional D1 backup and multi-device synchronization</p></div></div>
         <label>Team sync token<input id="sqlSyncToken" type="password" value="${escapeHtml(localStorage.getItem('tiger-sql-token') || '')}" autocomplete="off" placeholder="Shared team token" ${commandAccess?'':'disabled'}></label>
@@ -1199,12 +1251,12 @@ function renderSettings() {
       </article>
       <article class="settings-card">
         <div class="connection-title"><span class="connection-logo">TBA</span><div><h2>The Blue Alliance</h2><p>Official event results and TOWER climb verification</p></div></div>
-        <label>TBA API key<input id="tbaKey" type="password" value="${escapeHtml(settings.apiKey)}" autocomplete="off" placeholder="Paste your Read API key"></label>
+        <label>TBA API key<input id="tbaKey" type="password" value="${escapeHtml(settings.apiKey)}" autocomplete="off" placeholder="Optional for CRI"></label>
         <div class="grid">
           <label>Event key<input id="tbaEvent" value="${escapeHtml(settings.eventKey)}" placeholder="e.g. 2026mdpas"></label>
           <label>Season<input id="tbaYear" type="number" min="2026" max="2099" value="${escapeHtml(settings.year)}"></label>
         </div>
-        <p class="privacy-note">The key is stored only in this browser. Internet is needed only while syncing.</p>
+        <p class="privacy-note">CRI schedule sync is preconfigured and keeps the team API key off this device. A browser key is only needed for other events, season stats, or logo downloads.</p>
         <div class="settings-actions"><button id="saveTba" class="secondary">Save settings</button><button id="syncTba" class="primary">Sync event results</button></div>
         <div id="syncStatus" class="sync-status">${lastSync ? `Last successful sync: ${escapeHtml(lastSync)}` : 'Not synced yet'}</div>
         <div class="settings-divider"></div>
@@ -1239,6 +1291,10 @@ function renderSettings() {
     localStorage.setItem('tiger-tba-key', document.querySelector('#tbaKey').value.trim());
     localStorage.setItem('tiger-tba-event', document.querySelector('#tbaEvent').value.trim().toLowerCase());
     localStorage.setItem('tiger-tba-year', document.querySelector('#tbaYear').value.trim());
+  };
+  document.querySelector('#prepareCriSettings').onclick = async () => {
+    prepareCriDevice();
+    await go('home');
   };
   document.querySelector('#saveTba').onclick = () => { save(); toast('TBA settings saved on this device.'); };
   document.querySelector('#syncTba').onclick = async () => { save(); await syncTbaEvent(); };
@@ -1423,18 +1479,23 @@ function officialRobotValue(breakdown, robotNumber, phase) {
 async function syncTbaEvent() {
   const settings = tbaSettings();
   const status = document.querySelector('#syncStatus');
-  if (!settings.apiKey || !settings.eventKey) {
-    status.textContent = 'Enter both an API key and event key first.';
+  const builtInCri = settings.eventKey === CRI_EVENT.tbaKey;
+  if (!settings.eventKey || (!settings.apiKey && !builtInCri)) {
+    status.textContent = 'Enter an event key and API key. CRI can sync without a browser API key.';
     status.className = 'sync-status error';
     return;
   }
   status.textContent = 'Downloading official match results...';
   status.className = 'sync-status working';
   try {
-    const response = await fetch(`https://www.thebluealliance.com/api/v3/event/${encodeURIComponent(settings.eventKey)}/matches`, {
-      headers: tbaHeaders(settings.apiKey)
-    });
-    if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'API key was rejected.' : `TBA returned ${response.status}.`);
+    const response = await fetch(builtInCri && !settings.apiKey
+      ? '/api/tba/cri/matches'
+      : `https://www.thebluealliance.com/api/v3/event/${encodeURIComponent(settings.eventKey)}/matches`,
+    builtInCri && !settings.apiKey ? {} : { headers: tbaHeaders(settings.apiKey) });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      throw new Error(detail?.error || (response.status === 401 || response.status === 403 ? 'API key was rejected.' : `TBA returned ${response.status}.`));
+    }
     const matches = await response.json();
     localStorage.setItem('tiger-tba-schedule', JSON.stringify(matches.filter(match => match.comp_level === 'qm').map(match => ({
       key: match.key,
@@ -2141,6 +2202,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 async function initialize() {
   await ensureDefaultAdminPassword();
+  if (localStorage.getItem('tiger-cri-preset-version') !== CRI_EVENT.id) prepareCriDevice(false);
   applyColorTheme();
   updateAdminNav();
   applyAppMode();
