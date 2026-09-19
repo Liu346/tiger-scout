@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v23-constant-ball-speed';
+const CACHE = 'tiger-scout-v24-even-ball-spacing';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',

@@ -14,7 +14,8 @@
 .flow-robot,.flow-hub{display:grid;place-items:center;flex:0 0 52px;height:40px;border:2px solid var(--muted);border-radius:6px;font-size:10px;font-weight:700;color:var(--muted)}
 .flow-hub{border-color:var(--amber);color:var(--amber);border-radius:4px 4px 14px 14px}
 .fuel-stream{height:30px;flex:1;min-width:0;position:relative;overflow:hidden;border-bottom:1px dashed var(--line)}
-.fuel-stream i{position:absolute;top:7px;left:-12px;width:12px;height:12px;border-radius:50%;background:var(--amber);box-shadow:inset -2px -2px 0 #0003;animation:fuel-flow-ball 1.2s linear infinite;animation-delay:var(--ball-delay)}
+.fuel-stream i{position:absolute;top:7px;left:-12px;width:12px;height:12px;border-radius:50%;background:var(--amber);box-shadow:inset -2px -2px 0 #0003}
+.fuel-stream-running i{animation:fuel-flow-ball 1.2s linear infinite;animation-delay:var(--ball-delay)}
 @keyframes fuel-flow-ball{from{left:-12px}to{left:100%}}
 .fuel-flow[data-stopped="true"] .fuel-stream i{visibility:hidden;animation-play-state:paused}
 .fuel-flow[data-stopped="true"] .fuel-stream::after{content:'No fuel flow';position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:11px}
