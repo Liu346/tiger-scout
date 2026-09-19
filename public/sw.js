@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v21-cri-2026';
+const CACHE = 'tiger-scout-v22-fuel-15';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',

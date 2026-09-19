@@ -343,7 +343,8 @@ async function renderHome() {
   });
 }
 
-const fuelRateValue = value => Math.min(40, Math.max(0, Math.round((Number(value) || 0) * 2) / 2));
+const MAX_FUEL_RATE = 15;
+const fuelRateValue = value => Math.min(MAX_FUEL_RATE, Math.max(0, Math.round((Number(value) || 0) * 2) / 2));
 const fuelSecondsValue = value => Math.min(180, Math.max(0, Math.round((Number(value) || 0) * 10) / 10));
 function updateFuelEstimate(record, phase) {
   record[`${phase}FuelRate`] = fuelRateValue(record[`${phase}FuelRate`]);
@@ -354,12 +355,12 @@ function updateFuelEstimate(record, phase) {
 function fuelFlowControl(phase, label) {
   const rate = fuelRateValue(draft[`${phase}FuelRate`]);
   const seconds = fuelSecondsValue(draft[`${phase}FuelSeconds`]);
-  return `<section class="fuel-flow" data-fuel-phase="${phase}" style="--flow-fill:${rate / 40 * 100}%;--flow-duration:${rate ? 8 / rate : 1}s" data-stopped="${rate === 0}">
+  return `<section class="fuel-flow" data-fuel-phase="${phase}" style="--flow-fill:${rate / MAX_FUEL_RATE * 100}%;--flow-duration:${rate ? 8 / rate : 1}s" data-stopped="${rate === 0}">
     <div class="fuel-flow-heading"><label for="${phase}FuelRate">${label}<small>Scored FUEL flow rate</small></label><output id="${phase}FuelRateValue" for="${phase}FuelRate">${rate} <small>BSP</small></output></div>
     <p id="${phase}FlowHelp" class="fuel-flow-help">BSP = balls per second. Match the stream to FUEL entering the active HUB.</p>
     <div class="fuel-flow-preview" aria-hidden="true"><span class="flow-robot">ROBOT</span><div class="fuel-stream">${Array.from({length:8}, (_, index) => `<i style="--ball-index:${index}"></i>`).join('')}</div><span class="flow-hub">HUB</span></div>
-    <input class="fuel-flow-slider" id="${phase}FuelRate" name="${phase}FuelRate" type="range" min="0" max="40" step="0.5" value="${rate}" aria-describedby="${phase}FlowHelp" aria-valuetext="${rate} balls per second">
-    <div class="fuel-flow-scale" aria-hidden="true"><span>0 BSP</span><span>10</span><span>20</span><span>30</span><span>40 BSP</span></div>
+    <input class="fuel-flow-slider" id="${phase}FuelRate" name="${phase}FuelRate" type="range" min="0" max="${MAX_FUEL_RATE}" step="0.5" value="${rate}" aria-describedby="${phase}FlowHelp" aria-valuetext="${rate} balls per second">
+    <div class="fuel-flow-scale" aria-hidden="true"><span>0 BSP</span><span>5</span><span>10</span><span>15 BSP</span></div>
     <div class="fuel-flow-total"><label for="${phase}FuelSeconds">Seconds scoring<input id="${phase}FuelSeconds" name="${phase}FuelSeconds" type="number" inputmode="decimal" min="0" max="180" step="0.1" value="${seconds}" ${rate > 0 ? 'required' : ''} aria-describedby="${phase}TotalHelp"></label><div><span>Estimated FUEL scored</span><output id="${phase}FuelEstimate" for="${phase}FuelRate ${phase}FuelSeconds">${Math.round(rate * seconds)}</output></div></div>
     <p id="${phase}TotalHelp" class="fuel-flow-help">Rate × total seconds scoring in this phase. Count only time scoring in an active HUB. The estimate feeds your score graphs.</p>
   </section>`;
@@ -367,7 +368,7 @@ function fuelFlowControl(phase, label) {
 
 function fuelEditorCell(record, phase) {
   const hasRate = record[`${phase}FuelRate`] != null;
-  return `<input data-field="${phase}Fuel" type="number" min="0" value="${Number(record[`${phase}Fuel`] || 0)}" ${hasRate ? 'readonly aria-label="Estimated FUEL scored"' : 'aria-label="FUEL scored"'}>${hasRate ? `<div class="editor-fuel-details"><label>BSP<input data-field="${phase}FuelRate" type="number" min="0" max="40" step="0.5" required value="${fuelRateValue(record[`${phase}FuelRate`])}"></label><label>Seconds<input data-field="${phase}FuelSeconds" type="number" min="0" max="180" step="0.1" required value="${fuelSecondsValue(record[`${phase}FuelSeconds`])}"></label></div>` : ''}`;
+  return `<input data-field="${phase}Fuel" type="number" min="0" value="${Number(record[`${phase}Fuel`] || 0)}" ${hasRate ? 'readonly aria-label="Estimated FUEL scored"' : 'aria-label="FUEL scored"'}>${hasRate ? `<div class="editor-fuel-details"><label>BSP<input data-field="${phase}FuelRate" type="number" min="0" max="${MAX_FUEL_RATE}" step="0.5" required value="${fuelRateValue(record[`${phase}FuelRate`])}"></label><label>Seconds<input data-field="${phase}FuelSeconds" type="number" min="0" max="180" step="0.1" required value="${fuelSecondsValue(record[`${phase}FuelSeconds`])}"></label></div>` : ''}`;
 }
 
 function fuelMatchReadout(record, phase, label) {
@@ -383,7 +384,7 @@ function updateFuelFlowControl(phase) {
   draft[`${phase}FuelSeconds`] = secondsInput.value;
   updateFuelEstimate(draft, phase);
   const rate = draft[`${phase}FuelRate`];
-  control.style.setProperty('--flow-fill', `${rate / 40 * 100}%`);
+  control.style.setProperty('--flow-fill', `${rate / MAX_FUEL_RATE * 100}%`);
   control.style.setProperty('--flow-duration', `${rate ? 8 / rate : 1}s`);
   control.dataset.stopped = String(rate === 0);
   control.querySelector(`#${phase}FuelRateValue`).innerHTML = `${rate} <small>BSP</small>`;
