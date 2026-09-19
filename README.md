@@ -48,6 +48,8 @@ available for other events, season-stat requests, and team-logo downloads.
 ## Fuel flow scouting
 
 AUTO and TELEOP use a 0–15 BSP (balls per second) slider with a live fuel stream.
+The visual keeps ball travel speed constant and changes only the spacing between
+balls, so denser streams represent higher rates without implying faster shots.
 Enter the total seconds spent scoring into an active HUB for each phase. The app
 estimates scored fuel as flow rate × seconds, rounded to whole balls, for the
 existing score graphs and rankings. A nonzero flow rate requires scoring time.

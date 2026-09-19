@@ -344,8 +344,11 @@ async function renderHome() {
 }
 
 const MAX_FUEL_RATE = 15;
+const FUEL_BALL_TRAVEL_SECONDS = 1.2;
+const MAX_VISUAL_FUEL_BALLS = Math.ceil(MAX_FUEL_RATE * FUEL_BALL_TRAVEL_SECONDS);
 const fuelRateValue = value => Math.min(MAX_FUEL_RATE, Math.max(0, Math.round((Number(value) || 0) * 2) / 2));
 const fuelSecondsValue = value => Math.min(180, Math.max(0, Math.round((Number(value) || 0) * 10) / 10));
+const visualFuelBallCount = rate => rate > 0 ? Math.max(1, Math.round(fuelRateValue(rate) * FUEL_BALL_TRAVEL_SECONDS)) : 0;
 function updateFuelEstimate(record, phase) {
   record[`${phase}FuelRate`] = fuelRateValue(record[`${phase}FuelRate`]);
   record[`${phase}FuelSeconds`] = fuelSecondsValue(record[`${phase}FuelSeconds`]);
@@ -355,10 +358,11 @@ function updateFuelEstimate(record, phase) {
 function fuelFlowControl(phase, label) {
   const rate = fuelRateValue(draft[`${phase}FuelRate`]);
   const seconds = fuelSecondsValue(draft[`${phase}FuelSeconds`]);
-  return `<section class="fuel-flow" data-fuel-phase="${phase}" style="--flow-fill:${rate / MAX_FUEL_RATE * 100}%;--flow-duration:${rate ? 8 / rate : 1}s" data-stopped="${rate === 0}">
+  const ballCount = visualFuelBallCount(rate);
+  return `<section class="fuel-flow" data-fuel-phase="${phase}" style="--flow-fill:${rate / MAX_FUEL_RATE * 100}%" data-stopped="${rate === 0}">
     <div class="fuel-flow-heading"><label for="${phase}FuelRate">${label}<small>Scored FUEL flow rate</small></label><output id="${phase}FuelRateValue" for="${phase}FuelRate">${rate} <small>BSP</small></output></div>
-    <p id="${phase}FlowHelp" class="fuel-flow-help">BSP = balls per second. Match the stream to FUEL entering the active HUB.</p>
-    <div class="fuel-flow-preview" aria-hidden="true"><span class="flow-robot">ROBOT</span><div class="fuel-stream">${Array.from({length:8}, (_, index) => `<i style="--ball-index:${index}"></i>`).join('')}</div><span class="flow-hub">HUB</span></div>
+    <p id="${phase}FlowHelp" class="fuel-flow-help">BSP = balls per second. Ball speed stays constant; tighter spacing represents a higher scoring rate.</p>
+    <div class="fuel-flow-preview" aria-hidden="true"><span class="flow-robot">ROBOT</span><div class="fuel-stream">${Array.from({length:MAX_VISUAL_FUEL_BALLS}, (_, index) => `<i style="--ball-delay:${ballCount ? -index / ballCount * FUEL_BALL_TRAVEL_SECONDS : 0}s;--ball-position:${ballCount ? index / ballCount * 100 : 0}%"${index < ballCount ? '' : ' hidden'}></i>`).join('')}</div><span class="flow-hub">HUB</span></div>
     <input class="fuel-flow-slider" id="${phase}FuelRate" name="${phase}FuelRate" type="range" min="0" max="${MAX_FUEL_RATE}" step="0.5" value="${rate}" aria-describedby="${phase}FlowHelp" aria-valuetext="${rate} balls per second">
     <div class="fuel-flow-scale" aria-hidden="true"><span>0 BSP</span><span>5</span><span>10</span><span>15 BSP</span></div>
     <div class="fuel-flow-total"><label for="${phase}FuelSeconds">Seconds scoring<input id="${phase}FuelSeconds" name="${phase}FuelSeconds" type="number" inputmode="decimal" min="0" max="180" step="0.1" value="${seconds}" ${rate > 0 ? 'required' : ''} aria-describedby="${phase}TotalHelp"></label><div><span>Estimated FUEL scored</span><output id="${phase}FuelEstimate" for="${phase}FuelRate ${phase}FuelSeconds">${Math.round(rate * seconds)}</output></div></div>
@@ -384,9 +388,14 @@ function updateFuelFlowControl(phase) {
   draft[`${phase}FuelSeconds`] = secondsInput.value;
   updateFuelEstimate(draft, phase);
   const rate = draft[`${phase}FuelRate`];
+  const ballCount = visualFuelBallCount(rate);
   control.style.setProperty('--flow-fill', `${rate / MAX_FUEL_RATE * 100}%`);
-  control.style.setProperty('--flow-duration', `${rate ? 8 / rate : 1}s`);
   control.dataset.stopped = String(rate === 0);
+  control.querySelectorAll('.fuel-stream i').forEach((ball, index) => {
+    ball.hidden = index >= ballCount;
+    ball.style.setProperty('--ball-delay', `${ballCount ? -index / ballCount * FUEL_BALL_TRAVEL_SECONDS : 0}s`);
+    ball.style.setProperty('--ball-position', `${ballCount ? index / ballCount * 100 : 0}%`);
+  });
   control.querySelector(`#${phase}FuelRateValue`).innerHTML = `${rate} <small>BSP</small>`;
   control.querySelector(`#${phase}FuelEstimate`).value = draft[`${phase}Fuel`];
   rateInput.setAttribute('aria-valuetext', `${rate} balls per second`);
