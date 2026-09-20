@@ -76,6 +76,14 @@ Historical fuel counts are preserved. New rates, durations, and the separate
 **Played defense** checkbox are included in QR transfers, backups, and exports.
 The editor can change rates and durations and recalculates their estimates.
 
+## Data Readout
+
+Team rankings focus on the highest recorded scoring flow rate (**Peak BSP**) and
+average estimated points. The variance chart shows each leading team's standard
+deviation in points; a lower bar means its match scoring has been more
+predictable. EPA, EPA rank, tower rate, and consistency are hidden from this
+readout to keep the competition view focused.
+
 ## Protected data editor
 
 Open **Settings**, enter the initial editor password `Tigerbots`, and choose

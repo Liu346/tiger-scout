@@ -11,7 +11,7 @@ assert.match(source, /tbaKey: '2026vaale1'/);
 assert.match(source, /teams: \[[^\]]*'9072'[^\]]*'9072B'[^\]]*\]/s);
 assert.match(source, /removeItem\('tiger-tba-schedule'\)/);
 assert.match(source, /tiger-cri-preset-version/);
-assert.match(serviceWorker, /tiger-scout-v27-event-setup/);
+assert.match(serviceWorker, /tiger-scout-v28-variance-readout/);
 assert.doesNotMatch(workerSource, /TBA_API_KEY\s*[:=]\s*['"][A-Za-z0-9]{24,}/);
 
 const { default: worker } = await import('../dist/server/index.js');

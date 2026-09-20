@@ -828,7 +828,6 @@ async function importBackupChunk(payload) {
 async function renderData() {
   const allRecords = await records();
   const logos = await teamLogoMap();
-  const statboticsTeams = statboticsTeamMap();
   let savedEvents = [];
   try { savedEvents = JSON.parse(localStorage.getItem('tiger-saved-events') || '[]'); } catch {}
   const events = [...new Set([...savedEvents, ...allRecords.map(r => r.event || 'Unspecified event')])].sort();
@@ -840,51 +839,38 @@ async function renderData() {
     grouped[r.team] ||= [];
     grouped[r.team].push(r);
   });
-  const ranking = Object.entries(grouped).map(([team, rs]) => ({
-    team, matches: rs.length,
-    avg: rs.reduce((s,r)=>s+score(r),0)/rs.length,
-    auto: rs.reduce((s,r)=>s+Number(r.autoFuel || 0),0)/rs.length,
-    tower: rs.filter(r => r.teleTower && r.teleTower !== 'None').length / rs.length * 100,
-    consistency: Math.max(0, 100 - Math.sqrt(rs.reduce((s,r)=>s+(score(r)-(rs.reduce((a,x)=>a+score(x),0)/rs.length))**2,0)/rs.length)*3)
-  })).sort((a,b)=>b.avg-a.avg);
-  const dataView = localStorage.getItem('tiger-data-view') || 'rankings';
+  const ranking = Object.entries(grouped).map(([team, rs]) => {
+    const scores = rs.map(score);
+    const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    const variance = Math.sqrt(scores.reduce((sum, value) => sum + (value - avg) ** 2, 0) / scores.length);
+    const peakBsp = Math.max(0, ...rs.map(record => Math.max(Number(record.autoFuelRate || 0), Number(record.teleFuelRate || 0))));
+    return { team, matches: rs.length, avg, variance, peakBsp };
+  }).sort((a,b)=>b.avg-a.avg);
 
   view.innerHTML = `
     <section class="data-head"><div><p class="eyebrow">DATA READOUT</p><h1>${all.length} records. ${ranking.length} teams.</h1><label class="event-select">Viewing event<select id="datasetEvent"><option value="all">All saved events</option>${events.map(event=>`<option value="${escapeHtml(event)}" ${selectedEvent===event?'selected':''}>${escapeHtml(event)}</option>`).join('')}<option value="__create__">＋ Create new event…</option></select></label></div>
       <div><button id="demoData" class="demo-button">Load demo event</button><button id="exportCsv" class="secondary" ${all.length?'':'disabled'}>Export CSV</button><label class="secondary file">Import JSON<input id="importJson" type="file" accept=".json"></label></div>
     </section>
-    <nav class="picklist-subtabs data-subtabs" aria-label="Data readout views">
-      <button data-data-view="rankings" class="${dataView==='rankings'?'active':''}">Team rankings</button>
-      <button data-data-view="epa" class="${dataView==='epa'?'active':''}">EPA breakdown</button>
-    </nav>
     ${all.length ? `
-      ${dataView === 'epa' ? `<section class="table-card epa-breakdown"><div class="table-title"><h2>Statbotics EPA breakdown</h2><small>Refresh from Settings → Statbotics</small></div>
-        <div class="table-scroll"><table><thead><tr><th>Team</th><th>Total EPA</th><th>EPA rank</th><th>Auto EPA</th><th>Teleop EPA</th><th>Endgame EPA</th><th>Fuel EPA</th><th>Tower EPA</th></tr></thead>
-        <tbody>${ranking.map(x => { const stats=statboticsTeams[x.team]; return `<tr data-team="${escapeHtml(x.team)}"><td>${teamIdentity(x.team,logos)}</td><td>${stats?Number(stats.epa).toFixed(1):'—'}</td><td>${stats?.rank?`#${escapeHtml(stats.rank)}`:'—'}</td><td>${stats?Number(stats.autoEpa).toFixed(1):'—'}</td><td>${stats?Number(stats.teleopEpa).toFixed(1):'—'}</td><td>${stats?Number(stats.endgameEpa).toFixed(1):'—'}</td><td>${stats?Number(stats.fuelEpa).toFixed(1):'—'}</td><td>${stats?Number(stats.towerEpa).toFixed(2):'—'}</td></tr>`; }).join('')}</tbody></table></div>
-      </section>` : `
-      <section class="chart-card"><h2>Average estimated points</h2><div class="chartbox"><canvas id="chart"></canvas></div></section>
       <section class="table-card"><div class="table-title"><h2>Team rankings</h2><small>Tap a team for match history</small></div>
-        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Matches</th><th>Avg pts</th><th>EPA</th><th>EPA rank</th><th>Auto FUEL</th><th>Tower rate</th><th>Consistency</th></tr></thead>
-        <tbody>${ranking.map((x,i)=>`<tr data-team="${escapeHtml(x.team)}"><td>${i+1}</td><td>${teamIdentity(x.team, logos)}</td><td>${x.matches}</td><td>${x.avg.toFixed(1)}</td><td>${statboticsTeams[x.team] ? Number(statboticsTeams[x.team].epa).toFixed(1) : '—'}</td><td>${statboticsTeams[x.team]?.rank ? `#${escapeHtml(statboticsTeams[x.team].rank)}` : '—'}</td><td>${x.auto.toFixed(1)}</td><td>${Math.round(x.tower)}%</td><td>${Math.round(x.consistency)}%</td></tr>`).join('')}</tbody></table></div>
-      </section>`}
+        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Team</th><th>Matches</th><th>Peak BSP</th><th>Avg pts</th></tr></thead>
+        <tbody>${ranking.map((x,i)=>`<tr data-team="${escapeHtml(x.team)}"><td>${i+1}</td><td>${teamIdentity(x.team, logos)}</td><td>${x.matches}</td><td><strong>${x.peakBsp.toFixed(1)}</strong></td><td>${x.avg.toFixed(1)}</td></tr>`).join('')}</tbody></table></div>
+      </section>
+      <section class="chart-card"><div class="table-title"><h2>Score variance</h2><small>Standard deviation in points · lower is more predictable</small></div><div class="chartbox"><canvas id="chart"></canvas></div></section>
       <section class="backup"><button id="backupJson">Download full backup</button><button id="clearData">Clear all local data</button></section>`
       : `<section class="empty"><span>⌗</span><h2>No records yet</h2><p>Scout a match, scan your crew's records, or load a complete simulated REBUILT event.</p><button class="primary" data-go="scan">Scan first record</button><button id="emptyDemoData" class="demo-button">Load 360 test records</button></section>`}`;
 
   if (all.length) {
     if (document.querySelector('#chart')) chart = new Chart(document.querySelector('#chart'), {
       type: 'bar',
-      data: { labels: ranking.slice(0,10).map(x=>x.team), datasets:[{data:ranking.slice(0,10).map(x=>x.avg), backgroundColor:'#d9823f', borderRadius:6}] },
-      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false},ticks:{color:'#9cb0bb'}},y:{beginAtZero:true,ticks:{color:'#9cb0bb'},grid:{color:'#193040'}}} }
+      data: { labels: ranking.slice(0,12).map(x=>x.team), datasets:[{data:ranking.slice(0,12).map(x=>Number(x.variance.toFixed(2))), backgroundColor:'#d9823f', borderRadius:6}] },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{callbacks:{label:context=>`${context.parsed.y.toFixed(1)} pts standard deviation`}}}, scales:{x:{grid:{display:false},ticks:{color:'#9cb0bb'}},y:{beginAtZero:true,title:{display:true,text:'Points of variation',color:'#9cb0bb'},ticks:{color:'#9cb0bb'},grid:{color:'#193040'}}} }
     });
     document.querySelectorAll('[data-team]').forEach(row => row.onclick = () => showTeam(row.dataset.team, grouped[row.dataset.team]));
     document.querySelector('#exportCsv').onclick = () => downloadCsv(all);
     document.querySelector('#backupJson').onclick = () => download('tiger-scout-backup.json', JSON.stringify(all,null,2), 'application/json');
     document.querySelector('#clearData').onclick = async () => { if(confirm('Delete every local scouting record?')) { await (await dbPromise).clear('records'); go('data'); } };
   }
-  document.querySelectorAll('[data-data-view]').forEach(button => button.onclick = () => {
-    localStorage.setItem('tiger-data-view', button.dataset.dataView);
-    renderData();
-  });
   document.querySelector('#demoData').onclick = generateDemoData;
   if (document.querySelector('#emptyDemoData')) document.querySelector('#emptyDemoData').onclick = generateDemoData;
   document.querySelector('#datasetEvent').onchange = event => {
