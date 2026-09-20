@@ -36,11 +36,13 @@ reachable as `localhost` from an iPhone.
 ## Match Prep handoff
 
 Match Prep mode can save either a scheduled match or a six-team manual matchup
-to an offline catalog. A saved prep includes both alliances, projected scores,
-win chance, event, and timestamp. Use **Save & show QR**, then scan the code on
-another Tiger Scout device from its Scan tab. The imported prep appears under
-**Match Prep → Saved preps** even when the receiving device does not have the
-original scouting dataset.
+to an offline catalog. A handoff packet includes both alliances, projected
+scores, win chance, event details, relevant schedule entries, cached analytics,
+and every selected-event scouting record for those six teams. Use **Save & build
+QR packet**, then scan every displayed code on the other Tiger Scout device from
+its Scan tab. The receiving device merges the included records into its local
+dataset and adds the prep under **Match Prep → Saved preps**, where **View team
+data** opens the imported event records for deeper review.
 
 ## CRI 2026 preset
 

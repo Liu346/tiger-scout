@@ -523,7 +523,7 @@ async function renderQr(record) {
 async function renderScan() {
   const localRecords = await records();
   view.innerHTML = `
-    <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, a saved Match Prep, or a full-device backup. Duplicate records are ignored automatically.</p></section>
+    <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, every code in a Match Prep data packet, or a full-device backup. Duplicate records are ignored automatically.</p></section>
     <section class="scanner-card">
       <div id="reader"><video playsinline muted></video><div class="scan-frame"></div></div>
       <button id="startScan" class="primary">Start camera</button>
@@ -556,6 +556,7 @@ async function renderScan() {
 async function importPayload(payload) {
   try {
     if (payload.startsWith('TSB1:') || payload.startsWith('TSB2:')) return importBackupChunk(payload);
+    if (payload.startsWith('TMP2J:') || payload.startsWith('TMP2G:')) return importMatchPrepPacketChunk(payload);
     if (payload.startsWith('TMP1:')) return importMatchPrepPayload(payload);
     if (!payload.startsWith('PL1:')) throw new Error();
     const record = JSON.parse(decodeURIComponent(escape(atob(payload.slice(4)))));
@@ -1142,19 +1143,87 @@ function decodeMatchPrepPayload(payload) {
   };
 }
 
-function showMatchPrepQr(prep) {
+async function buildMatchPrepPacket(prep) {
+  const relevantTeams = [...new Set([...(prep.ours || []), ...(prep.opponents || [])].map(String).filter(Boolean))];
+  const teamSet = new Set(relevantTeams);
+  const eventName = prep.event || localStorage.getItem('tiger-selected-event') || 'Unspecified event';
+  const allRecords = await records();
+  const eventRecords = allRecords.filter(record => teamSet.has(String(record.team)) &&
+    (eventName === 'All saved events' || (record.event || 'Unspecified event') === eventName));
+  let schedule = [];
+  try { schedule = JSON.parse(localStorage.getItem('tiger-tba-schedule') || '[]'); } catch {}
+  const relevantSchedule = schedule.filter(match => [...(match.red || []), ...(match.blue || [])].some(team => teamSet.has(String(team))));
+  const analytics = statboticsTeamMap();
+  const relevantAnalytics = Object.fromEntries(relevantTeams.filter(team => analytics[team]).map(team => [team, analytics[team]]));
+  return {
+    v: 2,
+    createdAt: Date.now(),
+    prep,
+    competition: {
+      name: eventName,
+      tbaEventKey: localStorage.getItem('tiger-tba-event') || '',
+      year: localStorage.getItem('tiger-tba-year') || '',
+      teams: relevantTeams,
+      schedule: relevantSchedule,
+      details: eventName === CRI_EVENT.name ? CRI_EVENT : null
+    },
+    records: eventRecords,
+    teamAnalytics: relevantAnalytics
+  };
+}
+
+function validateMatchPrepPacket(packet) {
+  if (!packet || Number(packet.v) !== 2 || !packet.prep || !Array.isArray(packet.records) || !Array.isArray(packet.competition?.teams)) throw new Error('Invalid match prep packet');
+  const prep = decodeMatchPrepPayload(matchPrepPayload(packet.prep));
+  const relevantTeams = new Set([...prep.ours, ...prep.opponents].map(String));
+  if (!packet.competition.teams.every(team => relevantTeams.has(String(team)))) throw new Error('Unexpected team data');
+  return { ...packet, prep };
+}
+
+async function showMatchPrepQr(prep) {
   const panel = document.querySelector('#matchPrepQrPanel');
   if (!panel) return;
   panel.hidden = false;
-  panel.innerHTML = `
-    <div class="matchprep-qr-copy"><p class="eyebrow">MATCH PREP QR</p><h2>${escapeHtml(prep.title || 'Saved matchup')}</h2><p>Scan this in Tiger Scout's Scan tab on the other device. It will be added to that device's Match Prep catalog.</p></div>
-    <div class="qr-wrap"><div data-matchprep-qr></div></div>`;
-  new QRCode(panel.querySelector('[data-matchprep-qr]'), {
-    text: matchPrepPayload(prep), width: 300, height: 300,
-    colorDark: '#090807', colorLight: '#ffffff',
-    correctLevel: QRCode.CorrectLevel.M
-  });
+  panel.innerHTML = '<div class="matchprep-qr-copy"><p class="eyebrow">BUILDING PACKET</p><h2>Collecting the six teams’ data…</h2><p>Scouting records and competition details are being compressed for transfer.</p></div>';
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  try {
+    const packet = await buildMatchPrepPacket(prep);
+    const summary = {
+      teamCount: packet.competition.teams.length,
+      recordCount: packet.records.length,
+      scheduleCount: packet.competition.schedule.length
+    };
+    packet.prep = saveMatchPrepSnapshot({ ...prep, packetSummary: summary });
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(packet));
+    let version = 'TMP2J';
+    let packetBytes = jsonBytes;
+    if ('CompressionStream' in window) {
+      const stream = new Blob([jsonBytes]).stream().pipeThrough(new CompressionStream('gzip'));
+      packetBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+      version = 'TMP2G';
+    }
+    let binary = '';
+    for (let offset = 0; offset < packetBytes.length; offset += 0x8000) binary += String.fromCharCode(...packetBytes.subarray(offset, offset + 0x8000));
+    const parts = (btoa(binary).match(/.{1,1500}/g) || ['']);
+    const session = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    let index = 0;
+    const draw = () => {
+      panel.innerHTML = `
+        <div class="matchprep-qr-copy"><p class="eyebrow">MATCH DATA PACKET</p><h2>${escapeHtml(packet.prep.title || 'Saved matchup')}</h2><p>Scan all ${parts.length} code${parts.length === 1 ? '' : 's'} in Tiger Scout's Scan tab. This sends ${summary.recordCount} scouting records and ${summary.scheduleCount} schedule entries for the ${summary.teamCount} teams in this match.</p><div class="packet-progress"><b>Code ${index + 1} of ${parts.length}</b><span>${summary.teamCount} teams · ${summary.recordCount} records</span></div></div>
+        <div><div class="qr-wrap"><div data-matchprep-qr></div></div><div class="backup-qr-actions"><button data-packet-prev class="secondary" ${index === 0 ? 'disabled' : ''}>Previous</button><button data-packet-next class="primary">${index === parts.length - 1 ? 'Start over' : 'Next code'}</button></div></div>`;
+      new QRCode(panel.querySelector('[data-matchprep-qr]'), {
+        text: `${version}:${session}:${index}:${parts.length}:${parts[index]}`,
+        width: 300, height: 300, colorDark: '#090807', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.L
+      });
+      panel.querySelector('[data-packet-prev]').onclick = () => { index--; draw(); };
+      panel.querySelector('[data-packet-next]').onclick = () => { index = index === parts.length - 1 ? 0 : index + 1; draw(); };
+    };
+    draw();
+  } catch {
+    panel.innerHTML = '<div class="matchprep-qr-copy"><p class="eyebrow">PACKET ERROR</p><h2>Could not build this handoff</h2><p>Return to the matchup and try saving it again.</p></div>';
+    toast('Match Prep packet could not be created.', true);
+  }
 }
 
 async function importMatchPrepPayload(payload) {
@@ -1164,6 +1233,62 @@ async function importMatchPrepPayload(payload) {
     toast(`${prep.title || 'Match prep'} saved to the catalog.`);
     if (appMode() === 'matchprep' || appMode() === 'command') setTimeout(() => go('matchprep'), 500);
   } catch { toast('That is not a valid Tiger Scout match prep.', true); }
+}
+
+async function importMatchPrepPacketChunk(payload) {
+  try {
+    const match = payload.match(/^(TMP2[JG]):([^:]+):(\d+):(\d+):(.+)$/);
+    if (!match) throw new Error();
+    const [, version, session, indexText, totalText, data] = match;
+    const index = Number(indexText);
+    const total = Number(totalText);
+    if (!Number.isInteger(index) || !Number.isInteger(total) || index < 0 || index >= total || total > 100) throw new Error();
+    const key = `tiger-matchprep-packet-${session}`;
+    const state = JSON.parse(localStorage.getItem(key) || `{"version":"${version}","total":${total},"parts":{}}`);
+    if (state.total !== total || state.version !== version) throw new Error();
+    state.parts[index] = data;
+    localStorage.setItem(key, JSON.stringify(state));
+    const received = Object.keys(state.parts).length;
+    if (received < total) return toast(`Match packet code ${index + 1} saved — ${received} of ${total}.`);
+    const joined = Array.from({ length: total }, (_, partIndex) => state.parts[partIndex]).join('');
+    const binary = atob(joined);
+    let bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    if (version === 'TMP2G') {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    const packet = validateMatchPrepPacket(JSON.parse(new TextDecoder().decode(bytes)));
+    const db = await dbPromise;
+    let added = 0;
+    for (const record of packet.records) {
+      if (!record?.id || !record?.team || !record?.match || await db.get('records', record.id)) continue;
+      await db.put('records', record);
+      added++;
+    }
+    const analytics = { ...statboticsTeamMap(), ...(packet.teamAnalytics || {}) };
+    localStorage.setItem('tiger-statbotics-teams', JSON.stringify(analytics));
+    const prep = saveMatchPrepSnapshot({
+      ...packet.prep,
+      competition: packet.competition,
+      teamAnalytics: packet.teamAnalytics || {},
+      packetSummary: {
+        teamCount: packet.competition.teams.length,
+        recordCount: packet.records.length,
+        scheduleCount: packet.competition.schedule?.length || 0
+      }
+    });
+    if (packet.competition.name && packet.competition.name !== 'All saved events') {
+      let savedEvents = [];
+      try { savedEvents = JSON.parse(localStorage.getItem('tiger-saved-events') || '[]'); } catch {}
+      localStorage.setItem('tiger-saved-events', JSON.stringify([...new Set([...savedEvents, packet.competition.name])].sort()));
+    }
+    localStorage.removeItem(key);
+    localStorage.setItem('tiger-matchprep-view', 'catalog');
+    toast(`${prep.title || 'Match prep'} imported with ${added} new scouting records.`);
+    if (appMode() === 'matchprep' || appMode() === 'command') setTimeout(() => go('matchprep'), 700);
+  } catch {
+    toast('That Match Prep packet code is invalid.', true);
+  }
 }
 
 async function renderMatchPrep() {
@@ -1222,11 +1347,11 @@ async function renderMatchPrep() {
   const catalog = matchPrepCatalog();
   const shareControls = snapshot => {
     const complete = snapshot && [...snapshot.ours, ...snapshot.opponents].every(Boolean);
-    return `<section class="matchprep-share"><div><p class="eyebrow">OFFLINE HANDOFF</p><h2>Save and share this prep</h2><p>Keep a copy in the catalog and show a QR code that another Tiger Scout device can scan.</p></div><button id="saveMatchPrep" class="primary" ${complete ? '' : 'disabled'}>Save & show QR</button>${complete ? '' : '<small>Enter all six teams to create the handoff.</small>'}</section>`;
+    return `<section class="matchprep-share"><div><p class="eyebrow">OFFLINE HANDOFF</p><h2>Save and share this prep</h2><p>Create a compressed QR packet with this matchup, event details, and the selected event's scouting data for these six teams.</p></div><button id="saveMatchPrep" class="primary" ${complete ? '' : 'disabled'}>Save & build QR packet</button>${complete ? '' : '<small>Enter all six teams to create the handoff.</small>'}</section>`;
   };
   const catalogMarkup = `<section class="matchprep-catalog">
     <div class="matchprep-catalog-head"><div><p class="eyebrow">SAVED MATCH PREPS</p><h2>${catalog.length} in this device</h2></div><p>Imported QR handoffs and locally saved matchups stay available offline.</p></div>
-    ${catalog.length ? `<div class="matchprep-catalog-grid">${catalog.map(prep => `<article class="matchprep-catalog-card"><div class="catalog-card-head"><div><small>${escapeHtml(prep.event || 'Unspecified event')} · ${new Date(Number(prep.savedAt) || Date.now()).toLocaleString()}</small><h3>${escapeHtml(prep.title || 'Saved matchup')}</h3></div><strong>${Math.round(Number(prep.winChance) || 0)}%</strong></div><div class="catalog-score"><span>${escapeHtml((prep.ours || []).join(' · ') || 'No alliance')}</span><b>${Number(prep.ourScore || 0).toFixed(1)}–${Number(prep.opponentScore || 0).toFixed(1)}</b><span>${escapeHtml((prep.opponents || []).join(' · ') || 'No opponents')}</span></div><p>${escapeHtml(prep.outcome || 'Saved projection')}</p><div class="catalog-actions"><button class="secondary" data-prep-load="${escapeHtml(prep.id)}">Load matchup</button><button class="secondary" data-prep-share="${escapeHtml(prep.id)}">Show QR</button><button class="catalog-delete" data-prep-delete="${escapeHtml(prep.id)}">Delete</button></div></article>`).join('')}</div>` : '<section class="empty compact-empty"><span>VS</span><h2>No saved match preps</h2><p>Save a scheduled or manual matchup, or scan a Match Prep QR on the Scan tab.</p></section>'}
+    ${catalog.length ? `<div class="matchprep-catalog-grid">${catalog.map(prep => `<article class="matchprep-catalog-card"><div class="catalog-card-head"><div><small>${escapeHtml(prep.event || 'Unspecified event')} · ${new Date(Number(prep.savedAt) || Date.now()).toLocaleString()}</small><h3>${escapeHtml(prep.title || 'Saved matchup')}</h3></div><strong>${Math.round(Number(prep.winChance) || 0)}%</strong></div><div class="catalog-score"><span>${escapeHtml((prep.ours || []).join(' · ') || 'No alliance')}</span><b>${Number(prep.ourScore || 0).toFixed(1)}–${Number(prep.opponentScore || 0).toFixed(1)}</b><span>${escapeHtml((prep.opponents || []).join(' · ') || 'No opponents')}</span></div><p>${escapeHtml(prep.outcome || 'Saved projection')}</p>${prep.packetSummary ? `<p class="packet-summary">${Number(prep.packetSummary.teamCount) || 6} teams · ${Number(prep.packetSummary.recordCount) || 0} scouting records · ${Number(prep.packetSummary.scheduleCount) || 0} schedule entries</p>` : ''}<div class="catalog-actions"><button class="secondary" data-prep-load="${escapeHtml(prep.id)}">Load matchup</button><button class="secondary" data-prep-data="${escapeHtml(prep.id)}">View team data</button><button class="secondary" data-prep-share="${escapeHtml(prep.id)}">Build QR packet</button><button class="catalog-delete" data-prep-delete="${escapeHtml(prep.id)}">Delete</button></div></article>`).join('')}</div>` : '<section class="empty compact-empty"><span>VS</span><h2>No saved match preps</h2><p>Save a scheduled or manual matchup, or scan a Match Prep QR packet on the Scan tab.</p></section>'}
   </section>`;
   view.innerHTML = `
     <section class="pagehead matchprep-head"><p class="eyebrow">MATCH READOUT</p><h1>Prepare the next match</h1><p>Compare projected alliance output using this event's scouting averages.</p></section>
@@ -1292,6 +1417,12 @@ async function renderMatchPrep() {
     localStorage.setItem('tiger-matchprep-manual', JSON.stringify({ ours: prep.ours, opponents: prep.opponents }));
     localStorage.setItem('tiger-matchprep-view', 'manual');
     renderMatchPrep();
+  });
+  document.querySelectorAll('[data-prep-data]').forEach(button => button.onclick = () => {
+    const prep = catalog.find(item => item.id === button.dataset.prepData);
+    if (!prep) return;
+    if (prep.event && prep.event !== 'All saved events') localStorage.setItem('tiger-selected-event', prep.event);
+    go('data');
   });
   document.querySelectorAll('[data-prep-delete]').forEach(button => button.onclick = () => {
     const remaining = catalog.filter(item => item.id !== button.dataset.prepDelete);

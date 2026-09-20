@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v25-matchprep-catalog';
+const CACHE = 'tiger-scout-v26-matchprep-team-packet';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',
