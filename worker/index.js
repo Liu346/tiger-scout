@@ -75,6 +75,67 @@ async function fetchCriMatches(env) {
   return json(Array.isArray(matches) ? matches : []);
 }
 
+function selectRobotPhoto(media) {
+  const supportedTypes = new Set(['imgur', 'cdphotothread', 'instagram-image']);
+  return (Array.isArray(media) ? media : [])
+    .filter(item => supportedTypes.has(item?.type) && /^https:\/\//i.test(item?.direct_url || ''))
+    .sort((a, b) => Number(Boolean(b.preferred)) - Number(Boolean(a.preferred)))[0] || null;
+}
+
+function trustedPhotoUrl(value) {
+  try {
+    const url = new URL(value);
+    const allowedHosts = new Set([
+      'i.imgur.com',
+      'imgur.com',
+      'www.imgur.com',
+      'chiefdelphi.com',
+      'www.chiefdelphi.com',
+      'cdn.discordapp.com',
+      'media.discordapp.net',
+      'instagram.com',
+      'www.instagram.com',
+      'scontent.cdninstagram.com'
+    ]);
+    return url.protocol === 'https:' && allowedHosts.has(url.hostname.toLowerCase()) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTeamPhoto(request, env) {
+  if (!env.TBA_API_KEY) return json({ error: 'The Blue Alliance photo connection is not configured.' }, 503);
+  const url = new URL(request.url);
+  const team = url.searchParams.get('team') || '';
+  const year = Number(url.searchParams.get('year'));
+  if (!/^\d{1,5}$/.test(team) || !Number.isInteger(year) || year < 1992 || year > new Date().getUTCFullYear() + 1) {
+    return json({ error: 'Enter a valid team number and season.' }, 400);
+  }
+  const mediaResponse = await fetch(`https://www.thebluealliance.com/api/v3/team/frc${team}/media/${year}`, {
+    headers: { 'X-TBA-Auth-Key': env.TBA_API_KEY, 'Accept': 'application/json' }
+  });
+  if (!mediaResponse.ok) return json({ error: `The Blue Alliance returned ${mediaResponse.status}.` }, mediaResponse.status);
+  const photo = selectRobotPhoto(await mediaResponse.json());
+  if (!photo) return json({ error: `No robot photo is available for Team ${team} in ${year}.` }, 404);
+  const photoUrl = trustedPhotoUrl(photo.direct_url);
+  if (!photoUrl) return json({ error: 'The available photo uses an unsupported image host.' }, 422);
+  const imageResponse = await fetch(photoUrl.toString(), { headers: { 'Accept': 'image/*' } });
+  const contentType = (imageResponse.headers.get('content-type') || '').split(';')[0].toLowerCase();
+  const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+  const contentLength = Number(imageResponse.headers.get('content-length') || 0);
+  if (!imageResponse.ok || !allowedImageTypes.has(contentType)) return json({ error: 'The team photo could not be downloaded.' }, 502);
+  if (contentLength > 8_000_000) return json({ error: 'The available team photo is too large.' }, 413);
+  const body = await imageResponse.arrayBuffer();
+  if (body.byteLength > 8_000_000) return json({ error: 'The available team photo is too large.' }, 413);
+  return new Response(body, {
+    headers: {
+      'content-type': contentType,
+      'cache-control': 'public, max-age=86400',
+      'x-tiger-photo-source': photoUrl.toString()
+    }
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -82,6 +143,10 @@ export default {
       if (url.pathname === '/api/tba/cri/matches' && request.method === 'GET') {
         try { return await fetchCriMatches(env); }
         catch { return json({ error: 'Could not reach The Blue Alliance.' }, 502); }
+      }
+      if (url.pathname === '/api/tba/team-photo' && request.method === 'GET') {
+        try { return await fetchTeamPhoto(request, env); }
+        catch { return json({ error: 'Could not download the team photo.' }, 502); }
       }
       if (!authorized(request, env)) return json({ error: 'Unauthorized' }, 401);
       try {

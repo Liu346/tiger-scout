@@ -63,6 +63,15 @@ CRI match sync uses the hosted `TBA_API_KEY` secret through the Site Worker, so
 scouting phones do not need or receive the API key. Browser-supplied keys remain
 available for other events, season-stat requests, and team-logo downloads.
 
+## Team robot photos
+
+Open a team from Data Readout and use **Pull from Blue Alliance** beside the
+camera/photo picker. While online, Tiger Scout looks up that team in the season
+selected under Settings, downloads its preferred robot photo when available,
+resizes it, and saves it on the device for offline reference. The hosted Site
+uses its protected TBA connection; local deployments can fall back to the TBA
+API key saved in Settings.
+
 ## Fuel flow scouting
 
 AUTO and TELEOP use a 0–15 BSP (balls per second) slider with a live fuel stream.

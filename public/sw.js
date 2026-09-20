@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v28-variance-readout';
+const CACHE = 'tiger-scout-v29-tba-team-photos';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',

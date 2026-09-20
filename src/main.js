@@ -1969,6 +1969,37 @@ async function blobToDataUrl(blob) {
   });
 }
 
+function selectTbaRobotPhoto(media) {
+  const supportedTypes = new Set(['imgur', 'cdphotothread', 'instagram-image']);
+  return (Array.isArray(media) ? media : [])
+    .filter(item => supportedTypes.has(item?.type) && /^https:\/\//i.test(item?.direct_url || ''))
+    .sort((a, b) => Number(Boolean(b.preferred)) - Number(Boolean(a.preferred)))[0] || null;
+}
+
+async function fetchTbaTeamPhoto(team) {
+  const settings = tbaSettings();
+  const year = settings.year || String(new Date().getFullYear());
+  const hostedResponse = await fetch(`/api/tba/team-photo?team=${encodeURIComponent(team)}&year=${encodeURIComponent(year)}`);
+  if (hostedResponse.ok) {
+    const blob = await hostedResponse.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('The downloaded file was not an image.');
+    return { blob, year, sourceUrl: hostedResponse.headers.get('x-tiger-photo-source') || '' };
+  }
+  const hostedError = await hostedResponse.json().catch(() => null);
+  if (!settings.apiKey) throw new Error(hostedError?.error || 'Add a TBA API key in Settings, then try again.');
+  const mediaResponse = await fetch(`https://www.thebluealliance.com/api/v3/team/frc${encodeURIComponent(team)}/media/${encodeURIComponent(year)}`, {
+    headers: tbaHeaders(settings.apiKey)
+  });
+  if (!mediaResponse.ok) throw new Error(mediaResponse.status === 401 || mediaResponse.status === 403 ? 'The TBA API key was rejected.' : `The Blue Alliance returned ${mediaResponse.status}.`);
+  const photo = selectTbaRobotPhoto(await mediaResponse.json());
+  if (!photo) throw new Error(`No robot photo is available for Team ${team} in ${year}.`);
+  const imageResponse = await fetch(photo.direct_url, { headers: { 'Accept': 'image/*' } });
+  if (!imageResponse.ok) throw new Error('The team photo could not be downloaded.');
+  const blob = await imageResponse.blob();
+  if (!blob.type.startsWith('image/')) throw new Error('The downloaded file was not an image.');
+  return { blob, year, sourceUrl: photo.view_url || photo.direct_url };
+}
+
 async function downloadTeamLogos() {
   const settings = tbaSettings();
   const status = document.querySelector('#logoStatus');
@@ -2017,7 +2048,7 @@ async function downloadTeamLogos() {
 
 async function teamLogoMap() {
   const assets = await (await dbPromise).getAll('assets');
-  return Object.fromEntries(assets.filter(a => a.team && a.dataUrl).map(a => [String(a.team), a.dataUrl]));
+  return Object.fromEntries(assets.filter(a => a.id?.startsWith('team-logo-') && a.team && a.dataUrl).map(a => [String(a.team), a.dataUrl]));
 }
 
 function teamIdentity(team, logos) {
@@ -2482,9 +2513,13 @@ async function showTeam(team, rs) {
     </section>
     <section class="team-photo-card">
       <div class="team-photo-preview">${savedPhoto?.dataUrl ? `<img src="${escapeHtml(savedPhoto.dataUrl)}" alt="Saved robot photo for Team ${escapeHtml(team)}">` : '<span>No team photo saved</span>'}</div>
-      <div><p class="eyebrow">TEAM PHOTO</p><h2>Robot reference</h2><p>Take a picture or choose one from this device. It stays available offline with Team ${escapeHtml(team)}.</p>
-        <label class="demo-button team-photo-button">Take or choose photo<input id="teamPhotoInput" type="file" accept="image/*" capture="environment"></label>
-        ${savedPhoto?.dataUrl ? '<button id="removeTeamPhoto" class="secondary">Remove photo</button>' : ''}
+      <div><p class="eyebrow">TEAM PHOTO</p><h2>Robot reference</h2><p>Take or choose a picture, or pull the current-season robot photo from The Blue Alliance while online. Once saved, it stays available offline with Team ${escapeHtml(team)}.</p>
+        <div class="team-photo-actions">
+          <label class="demo-button team-photo-button">Take or choose photo<input id="teamPhotoInput" type="file" accept="image/*" capture="environment"></label>
+          <button id="pullTeamPhotoTba" class="secondary team-photo-tba" type="button">Pull from Blue Alliance</button>
+          ${savedPhoto?.dataUrl ? '<button id="removeTeamPhoto" class="secondary" type="button">Remove photo</button>' : ''}
+        </div>
+        <small class="team-photo-source">Internet required for Blue Alliance lookup.${savedPhoto?.source === 'tba-media' ? ` Saved from the ${escapeHtml(savedPhoto.year)} season.` : ''}</small>
       </div>
     </section>
     <section class="chart-card team-trend">
@@ -2506,6 +2541,35 @@ async function showTeam(team, rs) {
       await showTeam(team, rs);
     } catch {
       toast('That photo could not be saved.', true);
+    }
+  };
+  document.querySelector('#pullTeamPhotoTba').onclick = async event => {
+    if (!navigator.onLine) {
+      toast('Connect to the internet to pull a Blue Alliance photo.', true);
+      return;
+    }
+    const button = event.currentTarget;
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Looking up photo…';
+    try {
+      const photo = await fetchTbaTeamPhoto(team);
+      const dataUrl = await resizeTeamPhoto(photo.blob);
+      await db.put('assets', {
+        id:`team-photo-${team}`,
+        team:String(team),
+        dataUrl,
+        source:'tba-media',
+        sourceUrl:photo.sourceUrl,
+        year:photo.year,
+        savedAt:Date.now()
+      });
+      toast(`Blue Alliance photo saved for Team ${team}.`);
+      await showTeam(team, rs);
+    } catch (error) {
+      toast(error.message || 'The Blue Alliance photo could not be saved.', true);
+      button.disabled = false;
+      button.textContent = originalText;
     }
   };
   document.querySelector('#removeTeamPhoto')?.addEventListener('click', async () => {
