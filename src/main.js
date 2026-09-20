@@ -111,10 +111,10 @@ app.innerHTML = `
       <button data-go="scout">Scout</button>
       <button data-go="data" class="analysis-nav">Data Readout</button>
       <button data-go="picklist" class="analysis-nav">Picklist</button>
-      <button data-go="notes" class="notes-nav" hidden>Notes</button>
+      <button data-go="notes" class="notes-nav" data-feature-hidden hidden>Notes</button>
       <button data-go="matchprep" class="matchprep-nav" hidden>Match Prep</button>
-      <button data-go="compare" class="compare-nav" hidden>Compare</button>
-      <button data-go="prescout" class="prescout-nav" hidden>Pre-Scout</button>
+      <button data-go="compare" class="compare-nav" data-feature-hidden hidden>Compare</button>
+      <button data-go="prescout" class="prescout-nav" data-feature-hidden hidden>Pre-Scout</button>
       <button data-go="scan" class="scan-nav">Scan</button>
       <button data-go="editor" class="admin-nav" hidden>Editor</button>
     </nav>
@@ -128,10 +128,10 @@ app.innerHTML = `
     <button data-go="scout"><span>＋</span>Scout</button>
     <button data-go="data" class="analysis-nav"><span>▥</span>Readout</button>
     <button data-go="picklist" class="analysis-nav"><span>★</span>Picks</button>
-    <button data-go="notes" class="notes-nav" hidden><span>✎</span>Notes</button>
+    <button data-go="notes" class="notes-nav" data-feature-hidden hidden><span>✎</span>Notes</button>
     <button data-go="matchprep" class="matchprep-nav" hidden><span>VS</span>Prep</button>
-    <button data-go="compare" class="compare-nav" hidden><span>⇄</span>Compare</button>
-    <button data-go="prescout" class="prescout-nav" hidden><span>◫</span>Pre</button>
+    <button data-go="compare" class="compare-nav" data-feature-hidden hidden><span>⇄</span>Compare</button>
+    <button data-go="prescout" class="prescout-nav" data-feature-hidden hidden><span>◫</span>Pre</button>
     <button data-go="scan" class="scan-nav"><span>⌗</span>Scan</button>
     <button data-go="editor" class="admin-nav" hidden><span>✎</span>Edit</button>
   </nav>
@@ -158,13 +158,13 @@ function applyAppMode() {
   const command = appMode() === 'command';
   document.querySelectorAll('[data-go="scout"]').forEach(element => element.hidden = viewer);
   document.querySelectorAll('.analysis-nav').forEach(element => element.hidden = appMode() === 'scouting' || appMode() === 'notes');
-  document.querySelectorAll('.notes-nav').forEach(element => element.hidden = appMode() !== 'notes');
-  document.querySelectorAll('.matchprep-nav').forEach(element => element.hidden = appMode() !== 'matchprep');
-  document.querySelectorAll('.compare-nav').forEach(element => element.hidden = !command);
-  document.querySelectorAll('.prescout-nav').forEach(element => element.hidden = !command);
+  document.querySelectorAll('.notes-nav, .compare-nav, .prescout-nav').forEach(element => element.hidden = true);
+  document.querySelectorAll('.matchprep-nav').forEach(element => element.hidden = appMode() !== 'matchprep' && !command);
   document.querySelectorAll('.scan-nav').forEach(element => element.hidden = appMode() === 'scouting' || appMode() === 'notes');
   document.querySelectorAll('.admin-nav').forEach(element => element.hidden = !command && (!adminUnlocked() || appMode() === 'scouting' || appMode() === 'notes'));
-  if (command) document.querySelectorAll('.topnav button, .tabs button').forEach(element => element.hidden = false);
+  if (command) document.querySelectorAll('.topnav button, .tabs button').forEach(element => {
+    if (!element.hasAttribute('data-feature-hidden')) element.hidden = false;
+  });
   document.body.classList.toggle('database-mode', viewer);
   document.body.classList.toggle('notes-mode', appMode() === 'notes');
   document.body.classList.toggle('matchprep-mode', appMode() === 'matchprep');
@@ -523,7 +523,7 @@ async function renderQr(record) {
 async function renderScan() {
   const localRecords = await records();
   view.innerHTML = `
-    <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a record</h1><p>Point the camera at a Tiger Scout QR. Duplicate records are ignored automatically.</p></section>
+    <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, a saved Match Prep, or a full-device backup. Duplicate records are ignored automatically.</p></section>
     <section class="scanner-card">
       <div id="reader"><video playsinline muted></video><div class="scan-frame"></div></div>
       <button id="startScan" class="primary">Start camera</button>
@@ -556,6 +556,7 @@ async function renderScan() {
 async function importPayload(payload) {
   try {
     if (payload.startsWith('TSB1:') || payload.startsWith('TSB2:')) return importBackupChunk(payload);
+    if (payload.startsWith('TMP1:')) return importMatchPrepPayload(payload);
     if (!payload.startsWith('PL1:')) throw new Error();
     const record = JSON.parse(decodeURIComponent(escape(atob(payload.slice(4)))));
     if (!record.id || !record.team || !record.match) throw new Error();
@@ -1101,6 +1102,70 @@ async function renderCompareRobots() {
   });
 }
 
+function matchPrepCatalog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('tiger-matchprep-catalog') || '[]');
+    return Array.isArray(saved) ? saved.filter(item => item?.id && Array.isArray(item.ours) && Array.isArray(item.opponents)) : [];
+  } catch { return []; }
+}
+
+function saveMatchPrepSnapshot(snapshot) {
+  const saved = {
+    ...snapshot,
+    id: snapshot.id || `prep-${makeId()}`,
+    v: 1,
+    savedAt: Number(snapshot.savedAt) || Date.now(),
+    ours: (snapshot.ours || []).slice(0, 3).map(String),
+    opponents: (snapshot.opponents || []).slice(0, 3).map(String)
+  };
+  const catalog = [saved, ...matchPrepCatalog().filter(item => item.id !== saved.id)].slice(0, 60);
+  localStorage.setItem('tiger-matchprep-catalog', JSON.stringify(catalog));
+  return saved;
+}
+
+function matchPrepPayload(prep) {
+  return `TMP1:${btoa(unescape(encodeURIComponent(JSON.stringify(prep))))}`;
+}
+
+function decodeMatchPrepPayload(payload) {
+  if (!payload.startsWith('TMP1:')) throw new Error('Not a match prep');
+  const prep = JSON.parse(decodeURIComponent(escape(atob(payload.slice(5)))));
+  if (!prep?.id || !['schedule', 'manual'].includes(prep.kind) || !Array.isArray(prep.ours) || !Array.isArray(prep.opponents)) throw new Error('Invalid match prep');
+  return {
+    ...prep,
+    ours: prep.ours.slice(0, 3).map(String),
+    opponents: prep.opponents.slice(0, 3).map(String),
+    ourScore: Number(prep.ourScore) || 0,
+    opponentScore: Number(prep.opponentScore) || 0,
+    winChance: Math.min(100, Math.max(0, Number(prep.winChance) || 0)),
+    savedAt: Number(prep.savedAt) || Date.now()
+  };
+}
+
+function showMatchPrepQr(prep) {
+  const panel = document.querySelector('#matchPrepQrPanel');
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="matchprep-qr-copy"><p class="eyebrow">MATCH PREP QR</p><h2>${escapeHtml(prep.title || 'Saved matchup')}</h2><p>Scan this in Tiger Scout's Scan tab on the other device. It will be added to that device's Match Prep catalog.</p></div>
+    <div class="qr-wrap"><div data-matchprep-qr></div></div>`;
+  new QRCode(panel.querySelector('[data-matchprep-qr]'), {
+    text: matchPrepPayload(prep), width: 300, height: 300,
+    colorDark: '#090807', colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function importMatchPrepPayload(payload) {
+  try {
+    const prep = saveMatchPrepSnapshot(decodeMatchPrepPayload(payload));
+    localStorage.setItem('tiger-matchprep-view', 'catalog');
+    toast(`${prep.title || 'Match prep'} saved to the catalog.`);
+    if (appMode() === 'matchprep' || appMode() === 'command') setTimeout(() => go('matchprep'), 500);
+  } catch { toast('That is not a valid Tiger Scout match prep.', true); }
+}
+
 async function renderMatchPrep() {
   const allRecords = await records();
   const selectedEvent = localStorage.getItem('tiger-selected-event') || 'all';
@@ -1139,13 +1204,38 @@ async function renderMatchPrep() {
   const manualChance = Math.round(100 / (1 + Math.exp(-(manualOurScore - manualOpponentScore) / 18)));
   const manualOutcome = manualChance >= 65 ? 'Likely win' : manualChance <= 35 ? 'Likely loss' : 'Toss-up';
   const manualInputs = (side, values) => values.map((team, index) => `<label>Team ${index + 1}<input data-manual-side="${side}" data-manual-index="${index}" inputmode="numeric" value="${escapeHtml(team)}" placeholder="Team number"></label>`).join('');
+  const eventLabel = selectedEvent === 'all' ? 'All saved events' : selectedEvent;
+  const manualSnapshot = {
+    kind: 'manual', title: 'Manual matchup', event: eventLabel,
+    ours: manual.ours, opponents: manual.opponents,
+    ourScore: manualOurScore, opponentScore: manualOpponentScore,
+    winChance: manualChance, outcome: manualOutcome
+  };
+  const scheduleSnapshot = match ? {
+    id: `schedule-${selectedEvent}-${match.key}`,
+    kind: 'schedule', title: `Qualification ${match.number}`, event: eventLabel,
+    matchNumber: match.number, focusTeam: selectedTeam,
+    ours: selectedRed ? match.red : match.blue,
+    opponents: selectedRed ? match.blue : match.red,
+    ourScore, opponentScore, winChance, outcome
+  } : null;
+  const catalog = matchPrepCatalog();
+  const shareControls = snapshot => {
+    const complete = snapshot && [...snapshot.ours, ...snapshot.opponents].every(Boolean);
+    return `<section class="matchprep-share"><div><p class="eyebrow">OFFLINE HANDOFF</p><h2>Save and share this prep</h2><p>Keep a copy in the catalog and show a QR code that another Tiger Scout device can scan.</p></div><button id="saveMatchPrep" class="primary" ${complete ? '' : 'disabled'}>Save & show QR</button>${complete ? '' : '<small>Enter all six teams to create the handoff.</small>'}</section>`;
+  };
+  const catalogMarkup = `<section class="matchprep-catalog">
+    <div class="matchprep-catalog-head"><div><p class="eyebrow">SAVED MATCH PREPS</p><h2>${catalog.length} in this device</h2></div><p>Imported QR handoffs and locally saved matchups stay available offline.</p></div>
+    ${catalog.length ? `<div class="matchprep-catalog-grid">${catalog.map(prep => `<article class="matchprep-catalog-card"><div class="catalog-card-head"><div><small>${escapeHtml(prep.event || 'Unspecified event')} · ${new Date(Number(prep.savedAt) || Date.now()).toLocaleString()}</small><h3>${escapeHtml(prep.title || 'Saved matchup')}</h3></div><strong>${Math.round(Number(prep.winChance) || 0)}%</strong></div><div class="catalog-score"><span>${escapeHtml((prep.ours || []).join(' · ') || 'No alliance')}</span><b>${Number(prep.ourScore || 0).toFixed(1)}–${Number(prep.opponentScore || 0).toFixed(1)}</b><span>${escapeHtml((prep.opponents || []).join(' · ') || 'No opponents')}</span></div><p>${escapeHtml(prep.outcome || 'Saved projection')}</p><div class="catalog-actions"><button class="secondary" data-prep-load="${escapeHtml(prep.id)}">Load matchup</button><button class="secondary" data-prep-share="${escapeHtml(prep.id)}">Show QR</button><button class="catalog-delete" data-prep-delete="${escapeHtml(prep.id)}">Delete</button></div></article>`).join('')}</div>` : '<section class="empty compact-empty"><span>VS</span><h2>No saved match preps</h2><p>Save a scheduled or manual matchup, or scan a Match Prep QR on the Scan tab.</p></section>'}
+  </section>`;
   view.innerHTML = `
     <section class="pagehead matchprep-head"><p class="eyebrow">MATCH READOUT</p><h1>Prepare the next match</h1><p>Compare projected alliance output using this event's scouting averages.</p></section>
     <nav class="picklist-subtabs matchprep-subtabs" aria-label="Match preparation views">
       <button data-prep-view="schedule" class="${prepView==='schedule'?'active':''}">Scheduled match</button>
       <button data-prep-view="manual" class="${prepView==='manual'?'active':''}">Manual matchup</button>
+      <button data-prep-view="catalog" class="${prepView==='catalog'?'active':''}">Saved preps <span>${catalog.length}</span></button>
     </nav>
-    ${prepView === 'manual' ? `<section class="manual-matchup">
+    ${prepView === 'catalog' ? catalogMarkup : prepView === 'manual' ? `<section class="manual-matchup">
       <div class="manual-alliance our-alliance"><p class="eyebrow">YOUR ALLIANCE</p>${manualInputs('ours', manual.ours)}</div>
       <div class="manual-alliance opponent-alliance"><p class="eyebrow">OPPONENT ALLIANCE</p>${manualInputs('opponents', manual.opponents)}</div>
     </section>
@@ -1154,7 +1244,7 @@ async function renderMatchPrep() {
       <div class="alliance-projection our-projection"><div><p class="eyebrow">YOUR ALLIANCE</p><strong>${manualOurScore.toFixed(1)}</strong></div>${manual.ours.map(team => team ? teamCard(team, true) : '<article><span>Team not set</span><strong>0.0</strong><small>projected points</small></article>').join('')}</div>
       <div class="alliance-projection opponent-projection"><div><p class="eyebrow">OPPONENTS</p><strong>${manualOpponentScore.toFixed(1)}</strong></div>${manual.opponents.map(team => team ? teamCard(team, false) : '<article><span>Team not set</span><strong>0.0</strong><small>projected points</small></article>').join('')}</div>
       <p class="projection-note">Enter all six teams above. Projections update from the selected event's scouting records.</p>
-    </section>` : `
+    </section>${shareControls(manualSnapshot)}` : `
     <section class="matchprep-controls">
       <label>Selected team<select id="matchprepTeam">${teams.map(team => `<option value="${escapeHtml(team)}" ${team===selectedTeam?'selected':''}>Team ${escapeHtml(team)}</option>`).join('')}</select></label>
       <label>Next match<select id="matchprepMatch">${teamMatches.map(item => `<option value="${escapeHtml(item.key)}" ${item.key===selectedKey?'selected':''}>Qualification ${item.number}${item.redScore < 0 && item.blueScore < 0 ? ' • upcoming' : ' • played'}</option>`).join('')}</select></label>
@@ -1165,7 +1255,8 @@ async function renderMatchPrep() {
       <div class="alliance-projection red-projection"><div><p class="eyebrow">RED ALLIANCE</p><strong>${redProjected.toFixed(1)}</strong></div>${match.red.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <div class="alliance-projection blue-projection"><div><p class="eyebrow">BLUE ALLIANCE</p><strong>${blueProjected.toFixed(1)}</strong></div>${match.blue.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <p class="projection-note">Projection uses average points from locally available scouting records. Teams without records are shown as 0.0 and reduce confidence.</p>
-    </section>` : `<section class="empty matchprep-empty"><span>VS</span><h2>No upcoming schedule found</h2><p>Sync the event in Settings with The Blue Alliance to load qualification alliances.</p><button class="primary" data-go="settings">Open settings</button></section>`}`}`;
+    </section>${shareControls(scheduleSnapshot)}` : `<section class="empty matchprep-empty"><span>VS</span><h2>No upcoming schedule found</h2><p>Sync the event in Settings with The Blue Alliance to load qualification alliances.</p><button class="primary" data-go="settings">Open settings</button></section>`}`}
+    <section id="matchPrepQrPanel" class="matchprep-qr-panel" hidden></section>`;
   document.querySelectorAll('[data-prep-view]').forEach(button => button.onclick = () => {
     localStorage.setItem('tiger-matchprep-view', button.dataset.prepView);
     renderMatchPrep();
@@ -1182,6 +1273,30 @@ async function renderMatchPrep() {
   });
   document.querySelector('#matchprepMatch')?.addEventListener('change', event => {
     localStorage.setItem('tiger-matchprep-match', event.target.value);
+    renderMatchPrep();
+  });
+  document.querySelector('#saveMatchPrep')?.addEventListener('click', () => {
+    const snapshot = prepView === 'manual' ? manualSnapshot : scheduleSnapshot;
+    if (!snapshot || ![...snapshot.ours, ...snapshot.opponents].every(Boolean)) return toast('Enter all six teams first.', true);
+    const saved = saveMatchPrepSnapshot(snapshot);
+    showMatchPrepQr(saved);
+    toast('Match prep saved to the catalog.');
+  });
+  document.querySelectorAll('[data-prep-share]').forEach(button => button.onclick = () => {
+    const prep = catalog.find(item => item.id === button.dataset.prepShare);
+    if (prep) showMatchPrepQr(prep);
+  });
+  document.querySelectorAll('[data-prep-load]').forEach(button => button.onclick = () => {
+    const prep = catalog.find(item => item.id === button.dataset.prepLoad);
+    if (!prep) return;
+    localStorage.setItem('tiger-matchprep-manual', JSON.stringify({ ours: prep.ours, opponents: prep.opponents }));
+    localStorage.setItem('tiger-matchprep-view', 'manual');
+    renderMatchPrep();
+  });
+  document.querySelectorAll('[data-prep-delete]').forEach(button => button.onclick = () => {
+    const remaining = catalog.filter(item => item.id !== button.dataset.prepDelete);
+    localStorage.setItem('tiger-matchprep-catalog', JSON.stringify(remaining));
+    toast('Saved match prep deleted.');
     renderMatchPrep();
   });
 }
@@ -1255,7 +1370,7 @@ function renderSettings() {
           <option value="matchprep" ${appMode()==='matchprep'?'selected':''}>Match Prep mode</option>
           <option value="command" ${appMode()==='command'?'selected':''}>Command mode</option>
         </select></label>
-        <p class="privacy-note">Database viewer focuses on local analysis. Scouter mode includes scouting and notes. Match Prep adds projections. Command mode reveals every tab and exclusively controls database sync.</p>
+        <p class="privacy-note">Database viewer focuses on local analysis. Scouter mode focuses on entering match records. Match Prep adds projections and saved handoffs. Command mode reveals the active analysis tools and exclusively controls database sync.</p>
         <button id="saveAppMode" class="primary">Save device mode</button>
       </article>
       <article class="settings-card appearance-settings">
@@ -1281,7 +1396,7 @@ function renderSettings() {
         <button id="syncTbaSeason" class="secondary">Pull 9072 season win rate</button>
         <div id="tbaSeasonStatus" class="sync-status">${tbaSeasonStatusText()}</div>
       </article>
-      <article class="settings-card">
+      <article class="settings-card statbotics-settings" hidden aria-hidden="true">
         <div class="connection-title"><span class="connection-logo statbotics">SB</span><div><h2>Statbotics</h2><p>Optional EPA and EPA ranking for Team 9072</p></div></div>
         ${(() => { const availability = statboticsAvailability(); return `<div id="statboticsIndicator" class="availability-badge ${availability.state}"><i></i>${availability.label}</div>`; })()}
         <label class="check"><input id="statboticsEnabled" type="checkbox" ${localStorage.getItem('tiger-statbotics-enabled')==='yes'?'checked':''}><span>Use Statbotics when available</span></label>

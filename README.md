@@ -33,6 +33,15 @@ reachable as `localhost` from an iPhone.
 4. The dataset, rankings, charts, and team match histories update locally.
 5. Export CSV for analysis or JSON for a full backup.
 
+## Match Prep handoff
+
+Match Prep mode can save either a scheduled match or a six-team manual matchup
+to an offline catalog. A saved prep includes both alliances, projected scores,
+win chance, event, and timestamp. Use **Save & show QR**, then scan the code on
+another Tiger Scout device from its Scan tab. The imported prep appears under
+**Match Prep → Saved preps** even when the receiving device does not have the
+original scouting dataset.
+
 ## CRI 2026 preset
 
 The September 2026 deployment prepares each device once for the Chesapeake
@@ -64,9 +73,11 @@ Open **Settings**, enter the initial editor password `Tigerbots`, and choose
 **Unlock editor**. The Editor tab provides event filtering, search, and inline
 editing for every scouting record. The password can be changed in Settings.
 
-All libraries are bundled under `public/vendor`. Scouting and QR transfer make
-no internet requests. Optional cloud synchronization only runs when a user
-presses **Sync database**.
+All libraries are bundled under `public/vendor`. Scouting, Match Prep handoff,
+and QR transfer make no internet requests. Optional cloud synchronization only
+runs when a user presses **Sync database**. Notes, Pre-Scouting, Compare, and
+the Statbotics settings card are currently hidden without deleting their saved
+device data.
 
 ## ChatGPT Sites hosting
 
