@@ -27,11 +27,18 @@ reachable as `localhost` from an iPhone.
 
 ## Event workflow
 
-1. Open and install Tiger Scout on each device before arriving at the venue.
-2. Each scout records a robot's match and displays the resulting QR.
-3. The collector device scans every QR from the six scouts.
-4. The dataset, rankings, charts, and team match histories update locally.
-5. Export CSV for analysis or JSON for a full backup.
+1. Open **Events** on the lead device, enter the event details and numeric team
+   roster, then create the Event Setup QR.
+2. Open **Events** on every scouting device and scan that QR. The event is saved,
+   selected, and its team roster is preloaded without internet access.
+3. Each scout chooses the event from the scouting dropdown, enters whole-number
+   match and team numbers, and displays the resulting record QR.
+4. The collector device scans every QR from the six scouts.
+5. The dataset, rankings, charts, and team match histories update locally.
+6. Export CSV for analysis or JSON for a full backup.
+
+The Events tab also accepts setup QR screenshots and pasted setup payloads. Saved
+event configurations can be selected again or reshared from the same tab.
 
 ## Match Prep handoff
 

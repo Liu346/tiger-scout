@@ -109,6 +109,7 @@ app.innerHTML = `
     </button>
     <nav class="topnav" aria-label="Primary navigation">
       <button data-go="scout">Scout</button>
+      <button data-go="events">Events</button>
       <button data-go="data" class="analysis-nav">Data Readout</button>
       <button data-go="picklist" class="analysis-nav">Picklist</button>
       <button data-go="notes" class="notes-nav" data-feature-hidden hidden>Notes</button>
@@ -126,6 +127,7 @@ app.innerHTML = `
   <nav class="tabs">
     <button data-go="home"><span>⌂</span>Home</button>
     <button data-go="scout"><span>＋</span>Scout</button>
+    <button data-go="events"><span>◆</span>Events</button>
     <button data-go="data" class="analysis-nav"><span>▥</span>Readout</button>
     <button data-go="picklist" class="analysis-nav"><span>★</span>Picks</button>
     <button data-go="notes" class="notes-nav" data-feature-hidden hidden><span>✎</span>Notes</button>
@@ -189,6 +191,7 @@ async function go(page) {
   }
   setActive(page);
   if (page === 'scout') renderScout();
+  else if (page === 'events') renderEventCreator();
   else if (page === 'scan') await renderScan();
   else if (page === 'data') await renderData();
   else if (page === 'picklist') await renderPicklist();
@@ -410,19 +413,174 @@ function updateFuelFlowControl(phase) {
   secondsInput.setCustomValidity(rate > 0 && Number(secondsInput.value) <= 0 ? 'Enter the total seconds spent scoring for this flow rate.' : '');
 }
 
+function eventConfigs() {
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem('tiger-event-configs') || '[]'); } catch {}
+  const cri = {
+    id: CRI_EVENT.id, name: CRI_EVENT.name, fullName: CRI_EVENT.fullName,
+    eventKey: CRI_EVENT.tbaKey, year: CRI_EVENT.year,
+    date: `${CRI_EVENT.tournamentDate} / ${CRI_EVENT.showcaseDate}`,
+    location: CRI_EVENT.location, teams: CRI_EVENT.teams
+  };
+  const saved = Array.isArray(stored) ? stored.filter(event => event?.name) : [];
+  const savedCri = saved.find(event => event.name === CRI_EVENT.name);
+  return [savedCri || cri, ...saved.filter(event => event.name !== CRI_EVENT.name)];
+}
+
+function savedEventNames() {
+  let names = [];
+  try { names = JSON.parse(localStorage.getItem('tiger-saved-events') || '[]'); } catch {}
+  return [...new Set([...eventConfigs().map(event => event.name), ...names].filter(Boolean))].sort();
+}
+
+function saveEventConfig(config) {
+  const normalized = {
+    ...config,
+    id: config.id || `event-${makeId()}`,
+    name: String(config.name || '').trim(),
+    fullName: String(config.fullName || config.name || '').trim(),
+    eventKey: String(config.eventKey || '').trim().toLowerCase(),
+    year: String(config.year || new Date().getFullYear()),
+    date: String(config.date || '').trim(),
+    location: String(config.location || '').trim(),
+    teams: [...new Set((config.teams || []).map(String).filter(team => /^\d+$/.test(team) && Number(team) > 0))].sort((a, b) => Number(a) - Number(b)),
+    createdAt: Number(config.createdAt) || Date.now()
+  };
+  if (!normalized.name || !normalized.teams.length) throw new Error('Event name and teams are required');
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem('tiger-event-configs') || '[]'); } catch {}
+  stored = [normalized, ...(Array.isArray(stored) ? stored : []).filter(event => event.id !== normalized.id && event.name !== normalized.name)];
+  localStorage.setItem('tiger-event-configs', JSON.stringify(stored));
+  let rosters = {};
+  try { rosters = JSON.parse(localStorage.getItem('tiger-event-rosters') || '{}'); } catch {}
+  rosters[normalized.name] = normalized.teams;
+  localStorage.setItem('tiger-event-rosters', JSON.stringify(rosters));
+  localStorage.setItem('tiger-saved-events', JSON.stringify([...new Set([...savedEventNames(), normalized.name])].sort()));
+  return normalized;
+}
+
+function eventSetupPayload(config) {
+  return `EVT1:${btoa(unescape(encodeURIComponent(JSON.stringify(config))))}`;
+}
+
+function decodeEventSetupPayload(payload) {
+  if (!payload.startsWith('EVT1:')) throw new Error('Not an event setup');
+  const config = JSON.parse(decodeURIComponent(escape(atob(payload.slice(5)))));
+  if (!config?.name || !Array.isArray(config.teams)) throw new Error('Invalid event setup');
+  return config;
+}
+
+function activateEvent(config) {
+  localStorage.setItem('tiger-selected-event', config.name);
+  localStorage.setItem('tiger-last-scout-event', config.name);
+  if (config.eventKey) localStorage.setItem('tiger-tba-event', config.eventKey);
+  if (config.year) localStorage.setItem('tiger-tba-year', config.year);
+  draft.event = config.name;
+}
+
+function showEventSetupQr(config) {
+  const panel = document.querySelector('#eventSetupQrPanel');
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = `<div><p class="eyebrow">EVENT SETUP QR</p><h2>${escapeHtml(config.name)}</h2><p>Scan this on each device's Events tab to select the event and preload ${config.teams.length} team numbers.</p></div><div class="qr-wrap"><div data-event-qr></div></div>`;
+  new QRCode(panel.querySelector('[data-event-qr]'), {
+    text: eventSetupPayload(config), width: 300, height: 300,
+    colorDark: '#090807', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M
+  });
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function importEventSetupPayload(payload) {
+  try {
+    const config = saveEventConfig(decodeEventSetupPayload(payload));
+    activateEvent(config);
+    if (scanner) { await scanner.stop(); scanner.destroy(); scanner = null; }
+    toast(`${config.name} is ready with ${config.teams.length} teams.`);
+    setTimeout(() => go('scout'), 650);
+  } catch { toast('That is not a valid Tiger Scout event setup.', true); }
+}
+
+function renderEventCreator() {
+  const configs = eventConfigs();
+  const selectedName = localStorage.getItem('tiger-selected-event') || configs[0]?.name || '';
+  const selected = configs.find(event => event.name === selectedName) || configs[0];
+  view.innerHTML = `
+    <section class="pagehead event-head"><p class="eyebrow">EVENT SETUP</p><h1>Create or join an event</h1><p>Build one event QR, then scan it on every scouting device to preload the same event and team roster.</p></section>
+    <section class="event-creator-grid">
+      <form id="eventCreatorForm" class="event-create-card">
+        <p class="eyebrow">CREATE EVENT</p><h2>Event details</h2>
+        <div class="grid"><label>Event name<input name="name" required value="${escapeHtml(selected?.name || '')}" placeholder="e.g. CRI 2026"></label><label>Season<input name="year" type="number" min="2026" max="2099" step="1" required value="${escapeHtml(selected?.year || '2026')}"></label><label>Event key<input name="eventKey" value="${escapeHtml(selected?.eventKey || '')}" placeholder="Optional TBA key"></label><label>Date<input name="date" value="${escapeHtml(selected?.date || '')}" placeholder="Event date"></label></div>
+        <label>Location<input name="location" value="${escapeHtml(selected?.location || '')}" placeholder="Venue or city"></label>
+        <label>Team numbers<textarea name="teams" rows="7" required placeholder="One per line, or separated by commas">${escapeHtml((selected?.teams || []).join('\n'))}</textarea><small>Numbers only. Duplicate team numbers are removed automatically.</small></label>
+        <button class="primary wide" type="submit">Save event & create QR</button>
+      </form>
+      <section class="event-join-card">
+        <p class="eyebrow">JOIN EVENT</p><h2>Scan an event setup</h2><p>Use the camera or a screenshot from the event lead. Scanning immediately selects the event and preloads its team list.</p>
+        <div id="eventReader"><video playsinline muted></video><div class="scan-frame"></div></div>
+        <button id="startEventScan" class="primary">Start camera</button>
+        <label class="upload">Scan from screenshot<input id="eventQrFile" type="file" accept="image/*"></label>
+        <details><summary>Camera unavailable? Paste event payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import event</button></details>
+      </section>
+    </section>
+    <section id="eventSetupQrPanel" class="event-qr-panel" hidden></section>
+    <section class="saved-event-card"><div><p class="eyebrow">SAVED EVENTS</p><h2>${configs.length} event setup${configs.length === 1 ? '' : 's'}</h2></div><div class="saved-event-list">${configs.map(config => `<article><div><strong>${escapeHtml(config.name)}</strong><span>${config.teams.length} teams${config.location ? ` · ${escapeHtml(config.location)}` : ''}</span></div><div><button class="secondary" data-use-event="${escapeHtml(config.id)}">Use event</button><button class="secondary" data-share-event="${escapeHtml(config.id)}">Show QR</button></div></article>`).join('')}</div></section>`;
+  document.querySelector('#eventCreatorForm').onsubmit = event => {
+    event.preventDefault();
+    const fd = new FormData(event.target);
+    const rawTeams = String(fd.get('teams') || '').split(/[\s,]+/).filter(Boolean);
+    if (!rawTeams.length || rawTeams.some(team => !/^\d+$/.test(team) || Number(team) < 1)) return toast('Enter valid numeric team numbers only.', true);
+    try {
+      const config = saveEventConfig({
+        name: fd.get('name'), fullName: fd.get('name'), year: fd.get('year'), eventKey: fd.get('eventKey'),
+        date: fd.get('date'), location: fd.get('location'), teams: rawTeams
+      });
+      activateEvent(config);
+      showEventSetupQr(config);
+      toast(`${config.name} saved and selected.`);
+    } catch { toast('Event name and at least one team are required.', true); }
+  };
+  const video = document.querySelector('#eventReader video');
+  document.querySelector('#startEventScan').onclick = async () => {
+    try {
+      scanner = new QrScanner(video, result => importEventSetupPayload(result.data), { highlightScanRegion: true, returnDetailedScanResult: true });
+      await scanner.start();
+      document.querySelector('#startEventScan').hidden = true;
+    } catch { toast('Camera could not start. Try a screenshot instead.', true); }
+  };
+  document.querySelector('#eventQrFile').onchange = async event => {
+    try { await importEventSetupPayload(await QrScanner.scanImage(event.target.files[0])); }
+    catch { toast('No event QR code was found in that image.', true); }
+  };
+  document.querySelector('#importEventText').onclick = () => importEventSetupPayload(document.querySelector('#eventPayload').value.trim());
+  document.querySelectorAll('[data-use-event]').forEach(button => button.onclick = () => {
+    const config = configs.find(event => event.id === button.dataset.useEvent);
+    if (!config) return;
+    activateEvent(config); toast(`${config.name} selected.`); go('scout');
+  });
+  document.querySelectorAll('[data-share-event]').forEach(button => button.onclick = () => {
+    const config = configs.find(event => event.id === button.dataset.shareEvent);
+    if (config) showEventSetupQr(config);
+  });
+}
+
 function renderScout() {
   const selectedEvent = localStorage.getItem('tiger-selected-event') || 'all';
   const lastScoutEvent = localStorage.getItem('tiger-last-scout-event') || '';
   if (selectedEvent !== 'all') draft.event = selectedEvent;
   else if (!draft.event) draft.event = lastScoutEvent;
+  const events = savedEventNames();
+  if (!events.includes(draft.event)) draft.event = events.includes(selectedEvent) ? selectedEvent : events[0] || '';
+  let rosters = {};
+  try { rosters = JSON.parse(localStorage.getItem('tiger-event-rosters') || '{}'); } catch {}
+  const roster = rosters[draft.event] || eventConfigs().find(event => event.name === draft.event)?.teams || [];
   view.innerHTML = `
     <section class="pagehead"><p class="eyebrow">NEW RECORD</p><h1>Match scouting</h1><p>Complete the card, save it locally, then show its QR to your collector.</p></section>
     <form id="scoutForm" class="form-card">
       <fieldset><legend>Match setup</legend>
         <div class="grid">
-          <label>Event<input name="event" value="${escapeHtml(draft.event)}" placeholder="e.g. DCMP"></label>
-          <label>Match #<input name="match" type="number" min="1" required value="${escapeHtml(draft.match)}"></label>
-          <label>Team #<input name="team" inputmode="numeric" required value="${escapeHtml(draft.team)}"></label>
+          <label>Event<select name="event" required>${events.map(event => `<option value="${escapeHtml(event)}" ${draft.event===event?'selected':''}>${escapeHtml(event)}</option>`).join('')}</select><small>Create or join events from the Events tab.</small></label>
+          <label>Match #<input name="match" type="number" inputmode="numeric" min="1" step="1" required value="${escapeHtml(draft.match)}"></label>
+          <label>Team #<input name="team" type="number" inputmode="numeric" min="1" step="1" list="scoutEventTeams" required value="${escapeHtml(draft.team)}"><datalist id="scoutEventTeams">${roster.map(team => `<option value="${escapeHtml(team)}"></option>`).join('')}</datalist></label>
           <label>Scout name<input name="scout" required autocomplete="name" value="${escapeHtml(draft.scout)}" placeholder="Required"></label>
         </div>
         <div class="segmented">
@@ -463,6 +621,13 @@ function renderScout() {
     const input = event.target;
     if (input.name && !/^(auto|tele)Fuel/.test(input.name)) draft[input.name] = input.type === 'checkbox' ? input.checked : input.value;
   });
+  document.querySelector('[name="event"]').addEventListener('change', event => {
+    localStorage.setItem('tiger-selected-event', event.target.value);
+    localStorage.setItem('tiger-last-scout-event', event.target.value);
+    draft.event = event.target.value;
+    draft.team = '';
+    renderScout();
+  });
   document.querySelector('#scoutForm').onsubmit = saveScout;
 }
 
@@ -474,6 +639,18 @@ async function saveScout(e) {
   if (!draft.scout) {
     toast('Scout name is required.', true);
     e.target.elements.scout.focus();
+    return;
+  }
+  draft.match = String(draft.match).trim();
+  draft.team = String(draft.team).trim();
+  if (!/^\d+$/.test(draft.match) || Number(draft.match) < 1) {
+    toast('Match number must be a positive whole number.', true);
+    e.target.elements.match.focus();
+    return;
+  }
+  if (!/^\d+$/.test(draft.team) || Number(draft.team) < 1) {
+    toast('Team number must be a positive whole number.', true);
+    e.target.elements.team.focus();
     return;
   }
   draft.event = draft.event.trim();
@@ -558,6 +735,7 @@ async function importPayload(payload) {
     if (payload.startsWith('TSB1:') || payload.startsWith('TSB2:')) return importBackupChunk(payload);
     if (payload.startsWith('TMP2J:') || payload.startsWith('TMP2G:')) return importMatchPrepPacketChunk(payload);
     if (payload.startsWith('TMP1:')) return importMatchPrepPayload(payload);
+    if (payload.startsWith('EVT1:')) return importEventSetupPayload(payload);
     if (!payload.startsWith('PL1:')) throw new Error();
     const record = JSON.parse(decodeURIComponent(escape(atob(payload.slice(4)))));
     if (!record.id || !record.team || !record.match) throw new Error();
@@ -710,16 +888,7 @@ async function renderData() {
   document.querySelector('#demoData').onclick = generateDemoData;
   if (document.querySelector('#emptyDemoData')) document.querySelector('#emptyDemoData').onclick = generateDemoData;
   document.querySelector('#datasetEvent').onchange = event => {
-    if (event.target.value === '__create__') {
-      const name = prompt('New event name:')?.trim().slice(0, 60);
-      if (!name) return renderData();
-      const updatedEvents = [...new Set([...savedEvents, name])].sort();
-      localStorage.setItem('tiger-saved-events', JSON.stringify(updatedEvents));
-      localStorage.setItem('tiger-selected-event', name);
-      draft.event = name;
-      toast(`${name} created and selected.`);
-      return renderData();
-    }
+    if (event.target.value === '__create__') return go('events');
     localStorage.setItem('tiger-selected-event', event.target.value);
     renderData();
   };
