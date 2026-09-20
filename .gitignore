@@ -4,6 +4,7 @@ node_modules/
 dist/
 outputs/
 work/
+.sites-runtime/
 .env
 .env.*
 !.env.example

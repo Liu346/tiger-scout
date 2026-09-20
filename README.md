@@ -40,6 +40,12 @@ reachable as `localhost` from an iPhone.
 The Events tab also accepts setup QR screenshots and pasted setup payloads. Saved
 event configurations can be selected again or reshared from the same tab.
 
+On iPhone, the QR camera can switch between the back and front cameras. The
+**Scan from screenshot** controls use the same full-resolution image decoder for
+event setup QRs, scouting records, Match Prep packets, and device backups. Team
+photo pickers use Apple's full camera/photo-library chooser instead of forcing a
+specific lens, which improves compatibility with older phones such as iPhone SE.
+
 ## Match Prep handoff
 
 Match Prep mode can save either a scheduled match or a six-team manual matchup

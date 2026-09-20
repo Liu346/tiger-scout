@@ -486,3 +486,10 @@ tbody tr:hover{background:#25292c}
   .ios-install{grid-template-columns:auto 1fr;padding:18px;gap:15px}
   .ios-install ol{grid-column:1/-1;justify-content:space-between;border-top:1px solid var(--line);padding-top:15px}
 }
+
+/* iPhone-friendly camera selection and screenshot import */
+.scanner-controls{display:grid;grid-template-columns:1fr minmax(150px,220px);gap:10px;align-items:end;margin:10px 0}
+.scanner-controls .primary,.scanner-controls select{width:100%;min-height:48px}
+.scanner-controls label{gap:5px}
+.scanner-card>.scanner-controls+.upload,.event-join-card>.scanner-controls+.upload{display:block;width:100%;text-align:center;margin:10px 0}
+@media(max-width:520px){.scanner-controls{grid-template-columns:1fr}}

@@ -100,6 +100,55 @@ let editorSearch = '';
 let editorEvent = 'all';
 QrScanner.WORKER_PATH = new URL('public/vendor/qr-scanner-worker.min.js', location.href).href;
 
+async function scanQrImageFile(file) {
+  if (!file || (file.type && !file.type.startsWith('image/'))) throw new Error('Choose an image containing a QR code.');
+  const result = await QrScanner.scanImage(file, {
+    returnDetailedScanResult: true,
+    alsoTryWithoutScanRegion: true
+  });
+  const payload = typeof result === 'string' ? result : result?.data;
+  if (!payload || typeof payload !== 'string') throw new Error('No QR code found.');
+  return payload.trim();
+}
+
+async function startQrCamera(video, onDecode, cameraSelect) {
+  if (scanner) {
+    await scanner.stop();
+    scanner.destroy();
+    scanner = null;
+  }
+  const requested = cameraSelect?.value || 'environment';
+  const choices = [requested, requested === 'environment' ? 'user' : 'environment'];
+  let lastError;
+  for (const camera of choices) {
+    try {
+      scanner = new QrScanner(video, onDecode, {
+        highlightScanRegion: true,
+        highlightCodeOutline: true,
+        preferredCamera: camera,
+        returnDetailedScanResult: true
+      });
+      await scanner.start();
+      if (cameraSelect) cameraSelect.value = camera;
+      return camera;
+    } catch (error) {
+      lastError = error;
+      scanner?.destroy();
+      scanner = null;
+    }
+  }
+  throw lastError || new Error('No camera is available.');
+}
+
+function wireCameraSelect(select) {
+  if (!select) return;
+  select.onchange = async () => {
+    if (!scanner) return;
+    try { await scanner.setCamera(select.value); }
+    catch { toast('That camera is not available on this device.', true); }
+  };
+}
+
 const app = document.querySelector('#app');
 
 app.innerHTML = `
@@ -517,7 +566,7 @@ function renderEventCreator() {
       <section class="event-join-card">
         <p class="eyebrow">JOIN EVENT</p><h2>Scan an event setup</h2><p>Use the camera or a screenshot from the event lead. Scanning immediately selects the event and preloads its team list.</p>
         <div id="eventReader"><video playsinline muted></video><div class="scan-frame"></div></div>
-        <button id="startEventScan" class="primary">Start camera</button>
+        <div class="scanner-controls"><button id="startEventScan" class="primary">Start camera</button><label>Camera<select id="eventCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
         <label class="upload">Scan from screenshot<input id="eventQrFile" type="file" accept="image/*"></label>
         <details><summary>Camera unavailable? Paste event payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import event</button></details>
       </section>
@@ -540,16 +589,18 @@ function renderEventCreator() {
     } catch { toast('Event name and at least one team are required.', true); }
   };
   const video = document.querySelector('#eventReader video');
+  const cameraSelect = document.querySelector('#eventCamera');
+  wireCameraSelect(cameraSelect);
   document.querySelector('#startEventScan').onclick = async () => {
     try {
-      scanner = new QrScanner(video, result => importEventSetupPayload(result.data), { highlightScanRegion: true, returnDetailedScanResult: true });
-      await scanner.start();
+      await startQrCamera(video, result => importEventSetupPayload(result.data), cameraSelect);
       document.querySelector('#startEventScan').hidden = true;
     } catch { toast('Camera could not start. Try a screenshot instead.', true); }
   };
   document.querySelector('#eventQrFile').onchange = async event => {
-    try { await importEventSetupPayload(await QrScanner.scanImage(event.target.files[0])); }
+    try { await importEventSetupPayload(await scanQrImageFile(event.target.files?.[0])); }
     catch { toast('No event QR code was found in that image.', true); }
+    finally { event.target.value = ''; }
   };
   document.querySelector('#importEventText').onclick = () => importEventSetupPayload(document.querySelector('#eventPayload').value.trim());
   document.querySelectorAll('[data-use-event]').forEach(button => button.onclick = () => {
@@ -703,7 +754,7 @@ async function renderScan() {
     <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, every code in a Match Prep data packet, or a full-device backup. Duplicate records are ignored automatically.</p></section>
     <section class="scanner-card">
       <div id="reader"><video playsinline muted></video><div class="scan-frame"></div></div>
-      <button id="startScan" class="primary">Start camera</button>
+      <div class="scanner-controls"><button id="startScan" class="primary">Start camera</button><label>Camera<select id="scanCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
       <label class="upload">Or scan from a screenshot<input id="qrFile" type="file" accept="image/*"></label>
       <details><summary>Camera unavailable? Paste payload</summary><textarea id="payload" rows="4"></textarea><button id="importText" class="secondary">Import text</button></details>
       <section class="device-backup">
@@ -715,16 +766,18 @@ async function renderScan() {
       </section>
     </section>`;
   const video = document.querySelector('#reader video');
+  const cameraSelect = document.querySelector('#scanCamera');
+  wireCameraSelect(cameraSelect);
   document.querySelector('#startScan').onclick = async () => {
     try {
-      scanner = new QrScanner(video, result => importPayload(result.data), { highlightScanRegion: true, returnDetailedScanResult: true });
-      await scanner.start();
+      await startQrCamera(video, result => importPayload(result.data), cameraSelect);
       document.querySelector('#startScan').hidden = true;
     } catch (err) { toast('Camera could not start. Try a screenshot instead.', true); }
   };
   document.querySelector('#qrFile').onchange = async e => {
-    try { const result = await QrScanner.scanImage(e.target.files[0]); await importPayload(result); }
+    try { await importPayload(await scanQrImageFile(e.target.files?.[0])); }
     catch { toast('No QR code found in that image.', true); }
+    finally { e.target.value = ''; }
   };
   document.querySelector('#importText').onclick = () => importPayload(document.querySelector('#payload').value.trim());
   document.querySelector('#createBackupQr').onclick = () => showBackupQrSequence(localRecords);
@@ -1176,7 +1229,7 @@ async function renderPreScouting() {
     ${teams.length ? `<section class="table-card prescout-table">
       <div class="table-title"><div><p class="eyebrow">PRIOR EVENT RANKING</p><h2>${escapeHtml(sourceEvent)}</h2></div><small>Historical data—not a prediction of current performance</small></div>
       <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Photo</th><th>Team</th><th>Matches</th><th>Avg pts</th><th>Range</th><th>Fuel</th><th>Auto</th><th>Tower</th><th>Reliable</th></tr></thead>
-      <tbody>${teams.map((team,index) => `<tr><td>${index+1}</td><td><label class="prescout-photo-button" title="Take or choose a photo for Team ${escapeHtml(team.team)}">${teamPhotos[team.team] ? `<img src="${escapeHtml(teamPhotos[team.team])}" alt="Team ${escapeHtml(team.team)} robot">` : '<span>＋</span>'}<input type="file" accept="image/*" capture="environment" data-prescout-photo="${escapeHtml(team.team)}"></label></td><td><b>${escapeHtml(team.team)}</b></td><td>${team.matches}</td><td><strong>${team.average.toFixed(1)}</strong></td><td>${team.minimum.toFixed(0)}–${team.maximum.toFixed(0)}</td><td>${team.fuel.toFixed(1)}</td><td>${team.auto.toFixed(1)}</td><td>${team.tower.toFixed(1)}</td><td>${Math.round(team.reliability)}%</td></tr>`).join('')}</tbody></table></div>
+      <tbody>${teams.map((team,index) => `<tr><td>${index+1}</td><td><label class="prescout-photo-button" title="Take or choose a photo for Team ${escapeHtml(team.team)}">${teamPhotos[team.team] ? `<img src="${escapeHtml(teamPhotos[team.team])}" alt="Team ${escapeHtml(team.team)} robot">` : '<span>＋</span>'}<input type="file" accept="image/*" data-prescout-photo="${escapeHtml(team.team)}"></label></td><td><b>${escapeHtml(team.team)}</b></td><td>${team.matches}</td><td><strong>${team.average.toFixed(1)}</strong></td><td>${team.minimum.toFixed(0)}–${team.maximum.toFixed(0)}</td><td>${team.fuel.toFixed(1)}</td><td>${team.auto.toFixed(1)}</td><td>${team.tower.toFixed(1)}</td><td>${Math.round(team.reliability)}%</td></tr>`).join('')}</tbody></table></div>
     </section>` : '<section class="empty"><span>◫</span><h2>No previous-event records</h2><p>Store or import another event to build a pre-scouting baseline.</p></section>'}`;
   document.querySelector('#prescoutEvent')?.addEventListener('change', event => {
     localStorage.setItem('tiger-prescout-event', event.target.value);
@@ -2515,7 +2568,7 @@ async function showTeam(team, rs) {
       <div class="team-photo-preview">${savedPhoto?.dataUrl ? `<img src="${escapeHtml(savedPhoto.dataUrl)}" alt="Saved robot photo for Team ${escapeHtml(team)}">` : '<span>No team photo saved</span>'}</div>
       <div><p class="eyebrow">TEAM PHOTO</p><h2>Robot reference</h2><p>Take or choose a picture, or pull the current-season robot photo from The Blue Alliance while online. Once saved, it stays available offline with Team ${escapeHtml(team)}.</p>
         <div class="team-photo-actions">
-          <label class="demo-button team-photo-button">Take or choose photo<input id="teamPhotoInput" type="file" accept="image/*" capture="environment"></label>
+          <label class="demo-button team-photo-button">Camera or photo library<input id="teamPhotoInput" type="file" accept="image/*"></label>
           <button id="pullTeamPhotoTba" class="secondary team-photo-tba" type="button">Pull from Blue Alliance</button>
           ${savedPhoto?.dataUrl ? '<button id="removeTeamPhoto" class="secondary" type="button">Remove photo</button>' : ''}
         </div>
