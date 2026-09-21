@@ -944,7 +944,7 @@ async function renderData() {
 
   view.innerHTML = `
     <section class="data-head"><div><p class="eyebrow">DATA READOUT</p><h1>${all.length} records. ${ranking.length} teams.</h1><label class="event-select">Viewing event<select id="datasetEvent"><option value="all">All saved events</option>${events.map(event=>`<option value="${escapeHtml(event)}" ${selectedEvent===event?'selected':''}>${escapeHtml(event)}</option>`).join('')}<option value="__create__">＋ Create new event…</option></select></label></div>
-      <div><button id="demoData" class="demo-button">Load demo event</button><button id="exportCsv" class="secondary" ${all.length?'':'disabled'}>Export CSV</button><label class="secondary file">Import JSON<input id="importJson" type="file" accept=".json"></label></div>
+      <div><button id="demoData" class="demo-button">Load competition test data</button><button id="exportCsv" class="secondary" ${all.length?'':'disabled'}>Export CSV</button><label class="secondary file">Import JSON<input id="importJson" type="file" accept=".json"></label></div>
     </section>
     ${all.length ? `
       <section class="table-card"><div class="table-title"><h2>Team rankings</h2><small>Tap a team for match history</small></div>
@@ -953,7 +953,7 @@ async function renderData() {
       </section>
       <section class="chart-card"><div class="table-title"><h2>Score variance</h2><small>Standard deviation in points · lower is more predictable</small></div><div class="chartbox"><canvas id="chart"></canvas></div></section>
       <section class="backup"><button id="backupJson">Download full backup</button><button id="clearData">Clear all local data</button></section>`
-      : `<section class="empty"><span>⌗</span><h2>No records yet</h2><p>Scout a match, scan your crew's records, or load a complete simulated REBUILT event.</p><button class="primary" data-go="scan">Scan first record</button><button id="emptyDemoData" class="demo-button">Load 360 test records</button></section>`}`;
+      : `<section class="empty"><span>⌗</span><h2>No records yet</h2><p>Scout a match, scan your crew's records, or load a complete simulated CRI event using the current scouting sheet.</p><button class="primary" data-go="scan">Scan first record</button><button id="emptyDemoData" class="demo-button">Load competition test data</button></section>`}`;
 
   if (all.length) {
     if (document.querySelector('#chart')) chart = new Chart(document.querySelector('#chart'), {
@@ -2206,7 +2206,7 @@ async function renderPicklist() {
   if (!all.length) {
     view.innerHTML = `
       <section class="pagehead"><p class="eyebrow">ALLIANCE SELECTION</p><h1>Build your picklist</h1><p>Your rankings will connect directly to the scouting dataset.</p></section>
-      <section class="empty"><span>★</span><h2>Scouting data needed</h2><p>Collect records or load the simulated REBUILT event to configure a picklist.</p><button id="picklistDemo" class="demo-button">Load 360 test records</button></section>`;
+      <section class="empty"><span>★</span><h2>Scouting data needed</h2><p>Collect records or load simulated CRI data based on the current scouting sheet.</p><button id="picklistDemo" class="demo-button">Load competition test data</button></section>`;
     document.querySelector('#picklistDemo').onclick = async () => { await generateDemoData(); await go('picklist'); };
     return;
   }
@@ -2781,45 +2781,63 @@ async function showTeam(team, rs) {
 }
 
 async function generateDemoData() {
-  const teams = [9072, 449, 540, 612, 836, 888, 1111, 1389, 1418, 1629, 1719, 1731,
-    1885, 1895, 1908, 2068, 2186, 2363, 2377, 2421, 2534, 2890, 2963, 3136,
-    3359, 3748, 401, 4099, 422, 4464, 4472, 4505, 5243, 5338, 6882, 8326];
+  const teams = CRI_EVENT.teams.filter(team => /^\d+$/.test(String(team))).map(Number);
+  const matchesPerTeam = 12;
+  const scouts = ['Alex', 'Jordan', 'Morgan', 'Riley', 'Sam', 'Taylor'];
   let seed = 90722026;
   const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
-  const vary = (mean, spread) => Math.max(0, Math.round(mean + (random()+random()+random()-1.5)*spread));
+  const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+  const flowRate = (mean, spread) => Math.round(clamp(mean + (random()+random()+random()-1.5)*spread, 0, MAX_FUEL_RATE) * 2) / 2;
+  const scoringSeconds = (mean, spread, rate) => rate ? Math.round(clamp(mean + (random()+random()-1)*spread, .5, 180) * 10) / 10 : 0;
   const db = await dbPromise;
+  for (const record of await db.getAll('records')) {
+    if (String(record.id || '').startsWith('demo-2026-') || String(record.id || '').startsWith('demo-sheet-v3-')) {
+      await db.delete('records', record.id);
+    }
+  }
   let count = 0;
   for (let t = 0; t < teams.length; t++) {
     const quality = 0.22 + random() * 0.78;
-    const autoMean = 2 + quality * 20;
-    const teleMean = 18 + quality * 105;
     const climbSkill = Math.min(.96, .18 + quality * .78);
-    for (let m = 1; m <= 10; m++) {
+    for (let m = 1; m <= matchesPerTeam; m++) {
       const disabled = random() < .035;
       const climbed = !disabled && random() < climbSkill;
       const towerRoll = random();
       const teleTower = !climbed ? 'None' : towerRoll < quality*.45 ? 'Level 3' : towerRoll < .78 ? 'Level 2' : 'Level 1';
+      const autoFuelRate = disabled ? 0 : flowRate(.5 + quality * 6.5, 3.2);
+      const autoFuelSeconds = scoringSeconds(2 + quality * 4.5, 3, autoFuelRate);
+      const teleFuelRate = disabled ? 0 : flowRate(1.5 + quality * 11.5, 4.5);
+      const teleFuelSeconds = scoringSeconds(5 + quality * 8, 5, teleFuelRate);
+      const playedDefense = !disabled && random() < .12 + (1-quality) * .5;
+      const defense = playedDefense ? clamp(Math.round(1 + random() * 3 + (1-quality)), 1, 5) : 0;
+      const fouls = disabled ? 0 : random() < .08 ? 2 : random() < .18 ? 1 : 0;
+      const groundIntake = !disabled && random() < .35 + quality * .55;
+      const trench = !disabled && random() < .45 + quality * .45;
+      const bump = !disabled && random() < .35 + quality * .5;
       await db.put('records', {
-        id: `demo-2026-${teams[t]}-${m}`, v: 2, event: 'TigerBots Invitational',
-        match: String(m * 4 + (t % 4)), team: String(teams[t]), scout: 'Demo generator',
+        id: `demo-sheet-v3-${teams[t]}-${m}`, v: 3, event: CRI_EVENT.name,
+        match: String(m * 3 + (t % 3)), team: String(teams[t]), scout: scouts[(t + m) % scouts.length],
         alliance: (t + m) % 2 ? 'red' : 'blue',
-        autoFuel: disabled ? 0 : vary(autoMean, 12),
+        autoFuelRate, autoFuelSeconds, autoFuel: Math.round(autoFuelRate * autoFuelSeconds),
         autoTower: !disabled && random() < quality * .16 ? 'Level 1' : 'None',
-        teleFuel: disabled ? 0 : vary(teleMean, 45),
-        teleTower, groundIntake: random() < .35 + quality * .55,
-        trench: random() < .45 + quality * .45, bump: random() < .35 + quality * .5,
-        defense: quality < .48 ? Math.round(random()*5) : Math.round(random()*2),
-        fouls: random() < .13 ? 1 : 0, broke: disabled,
+        teleFuelRate, teleFuelSeconds, teleFuel: Math.round(teleFuelRate * teleFuelSeconds),
+        teleTower, groundIntake, trench, bump, playedDefense, defense,
+        fouls, broke: disabled,
         notes: disabled ? 'Robot became disabled during the match.' :
-          quality > .82 ? 'Fast FUEL cycles, accurate HUB shooting, strong field awareness.' :
-          quality < .38 ? 'Developing consistency; best contribution may be defense or support.' :
-          'Reliable cycles with steady positioning around active HUB shifts.',
-        createdAt: Date.now() - (10-m) * 3600000
+          playedDefense ? `Played defense for part of the match; ${defense >= 4 ? 'strong positioning and disruption.' : 'some effective pressure.'}` :
+          quality > .82 ? 'High sustained FUEL flow, accurate HUB shooting, and strong field awareness.' :
+          quality < .38 ? 'Developing FUEL consistency; reliable support around active HUB shifts.' :
+          'Steady scoring windows with reliable field movement and positioning.',
+        createdAt: Date.now() - (matchesPerTeam-m) * 3600000
       });
       count++;
     }
   }
-  toast(`${count} REBUILT records loaded.`);
+  const savedEvents = savedEventNames();
+  localStorage.setItem('tiger-saved-events', JSON.stringify([...new Set([...savedEvents, CRI_EVENT.name])].sort()));
+  localStorage.setItem('tiger-selected-event', CRI_EVENT.name);
+  localStorage.setItem('tiger-last-scout-event', CRI_EVENT.name);
+  toast(`${count} current-sheet CRI test records loaded.`);
   await go('data');
 }
 

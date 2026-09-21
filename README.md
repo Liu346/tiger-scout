@@ -94,6 +94,11 @@ Historical fuel counts are preserved. New rates, durations, and the separate
 **Played defense** checkbox are included in QR transfers, backups, and exports.
 The editor can change rates and durations and recalculates their estimates.
 
+The **Load competition test data** action replaces earlier demo records with a
+simulated CRI dataset that follows the current scouting sheet: 0–15 BSP rates,
+scoring time, calculated FUEL, tower results, intake and field access, separate
+defense participation and rating, fouls, breakdowns, scout names, and notes.
+
 ## Data Readout
 
 Team rankings focus on the highest recorded scoring flow rate (**Peak BSP**) and
