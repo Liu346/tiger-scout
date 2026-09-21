@@ -350,10 +350,10 @@ async function renderHome() {
   const tigerTrendChange = tigerRecent.length && tigerEarlier.length
     ? tigerRecent.reduce((sum,value)=>sum+value,0)/tigerRecent.length - tigerEarlier.reduce((sum,value)=>sum+value,0)/tigerEarlier.length
     : 0;
-  let statbotics = null;
+  let match13 = null;
   try {
-    const cached = JSON.parse(localStorage.getItem('tiger-statbotics-9072') || 'null');
-    if (cached?.available && Date.now() - Number(cached.fetchedAt || 0) < 21600000) statbotics = cached;
+    const cached = JSON.parse(localStorage.getItem('tiger-match13-9072') || 'null');
+    if (cached?.available && Date.now() - Number(cached.fetchedAt || 0) < 21600000) match13 = cached;
   } catch {}
   view.innerHTML = `
     <section class="home-dashboard-head">
@@ -383,8 +383,8 @@ async function renderHome() {
         <span><strong>${tigerOfficialMatches.length ? tigerOfficial.highScore : '—'}</strong><small>HIGH SCORE</small></span>
         ${tigerSeason ? `<span><strong>${tigerSeason.wins}-${tigerSeason.losses}-${tigerSeason.ties}</strong><small>2026 RECORD</small></span>
         <span><strong>${tigerSeason.winRate}%</strong><small>SEASON WIN RATE</small></span>` : ''}
-        ${statbotics ? `<span><strong>${Number(statbotics.epa).toFixed(1)}</strong><small>STATBOTICS EPA</small></span>
-        <span><strong>${statbotics.rank ? `#${escapeHtml(statbotics.rank)}` : '—'}</strong><small>EPA RANK</small></span>` : ''}
+        ${match13 ? `<span><strong>${Number(match13.xp).toFixed(1)}</strong><small>MATCH13 XP</small></span>
+        <span><strong>${match13.rank ? `#${escapeHtml(match13.rank)}` : '—'}</strong><small>XP RANK</small></span>` : ''}
       </div>${tigerRecords.length ? '<button id="openTigerProfile">View Team 9072 →</button>' : ''}` : `<div class="tiger-spotlight-empty"><p>No Team 9072 or official TBA records in this event yet.</p><button data-go="scout">Scout 9072 →</button></div>`}
     </section>
     <section class="operations-strip">
@@ -1036,89 +1036,92 @@ async function syncTbaSeasonRecord() {
   }
 }
 
-function statboticsStatusText() {
-  if (localStorage.getItem('tiger-statbotics-enabled') !== 'yes') return 'Statbotics is disabled.';
-  try {
-    const cached = JSON.parse(localStorage.getItem('tiger-statbotics-9072') || 'null');
-    if (cached?.available) return `Available • EPA ${Number(cached.epa).toFixed(1)}${cached.rank ? ` • Rank #${cached.rank}` : ''}`;
-  } catch {}
-  return 'No active Statbotics connection.';
+function match13Enabled() {
+  return localStorage.getItem('tiger-match13-enabled') !== 'no';
 }
 
-function statboticsAvailability() {
-  if (localStorage.getItem('tiger-statbotics-enabled') !== 'yes') return { state:'disabled', label:'Disabled' };
+function match13StatusText() {
+  if (!match13Enabled()) return 'Match13 is disabled.';
   try {
-    const cached = JSON.parse(localStorage.getItem('tiger-statbotics-9072') || 'null');
+    const cached = JSON.parse(localStorage.getItem('tiger-match13-9072') || 'null');
+    if (cached?.available) return `Available • XP ${Number(cached.xp).toFixed(1)}${cached.rank ? ` • Rank #${cached.rank}` : ''}`;
+  } catch {}
+  return 'No active Match13 connection.';
+}
+
+function match13Availability() {
+  if (!match13Enabled()) return { state:'disabled', label:'Disabled' };
+  try {
+    const cached = JSON.parse(localStorage.getItem('tiger-match13-9072') || 'null');
     if (cached?.available) return { state:'success', label:'Pull succeeded' };
     if (cached?.available === false) return { state:'failed', label:'Pull failed' };
   } catch {}
   return { state:'disabled', label:'Not checked' };
 }
 
-function statboticsTeamMap() {
-  try { return JSON.parse(localStorage.getItem('tiger-statbotics-teams') || '{}'); }
+function match13TeamMap() {
+  try { return JSON.parse(localStorage.getItem('tiger-match13-teams') || '{}'); }
   catch { return {}; }
 }
 
-function parseStatboticsTeam(data) {
-  const epa = data?.epa?.total_points?.mean ?? data?.epa?.total_points ?? data?.epa?.mean ?? data?.epa?.current ??
-    data?.epa_end ?? data?.epa_mean ?? data?.norm_epa?.current;
-  const rank = data?.epa?.total_points?.rank ?? data?.epa?.ranks?.total?.rank ?? data?.epa?.rank ?? data?.epa_rank ??
-    data?.rank?.epa ?? data?.ranks?.epa;
-  const breakdown = data?.epa?.breakdown || {};
-  return Number.isFinite(Number(epa)) ? {
-    epa:Number(epa), rank:rank || null,
-    autoEpa:Number(breakdown.auto_points ?? breakdown.auto ?? 0),
-    teleopEpa:Number(breakdown.teleop_points ?? breakdown.teleop ?? 0),
-    endgameEpa:Number(breakdown.endgame_points ?? breakdown.endgame ?? 0),
-    fuelEpa:Number(breakdown.total_fuel ?? 0),
-    towerEpa:Number(breakdown.total_tower ?? 0)
+function parseMatch13Team(data, rank = null) {
+  const xp = data?.xpEnd ?? data?.xp;
+  return Number.isFinite(Number(xp)) ? {
+    xp:Number(xp),
+    normXp:Number(data?.normXp || 0),
+    rank:rank || Number(data?.rank) || null,
+    percentile:Number(data?.percentile || 0),
+    variance:Number(data?.xVar || 0),
+    autoXp:Number(data?.xAuto || 0),
+    teleopXp:Number(data?.xTele || 0),
+    endgameXp:Number(data?.xEnd || 0),
+    components:data?.components && typeof data.components === 'object' ? data.components : {}
   } : null;
 }
 
-async function fetchStatboticsTeam(team, year = '2026') {
+async function fetchMatch13Team(team, year = '2026') {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`https://api.statbotics.io/v3/team_year/${encodeURIComponent(team)}/${encodeURIComponent(year)}`, {
+    const response = await fetch(`/api/match13/team?team=${encodeURIComponent(team)}&year=${encodeURIComponent(year)}`, {
       signal:controller.signal, headers:{Accept:'application/json'}
     });
     if (!response.ok) return null;
-    return parseStatboticsTeam(await response.json());
+    return parseMatch13Team(await response.json());
   } catch { return null; }
   finally { clearTimeout(timeout); }
 }
 
-async function fetchStatboticsMatch(matchKey) {
-  if (localStorage.getItem('tiger-statbotics-enabled') !== 'yes' || !matchKey) return null;
+async function fetchMatch13Match(matchKey) {
+  if (!match13Enabled() || !matchKey) return null;
   let cache = {};
-  try { cache = JSON.parse(localStorage.getItem('tiger-statbotics-matches') || '{}'); } catch {}
+  try { cache = JSON.parse(localStorage.getItem('tiger-match13-matches') || '{}'); } catch {}
   if (cache[matchKey] && Date.now() - Number(cache[matchKey].fetchedAt || 0) < 1800000) return cache[matchKey];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   try {
-    const response = await fetch(`https://api.statbotics.io/v3/match/${encodeURIComponent(matchKey)}`, {
+    const response = await fetch(`/api/match13/match?matchKey=${encodeURIComponent(matchKey)}`, {
       signal:controller.signal, headers:{Accept:'application/json'}
     });
     if (!response.ok) return null;
     const data = await response.json();
-    const prediction = data?.pred || data?.prediction || {};
-    const redWin = prediction.red_win_prob ?? prediction.redWinProb ?? data?.red_win_prob;
-    const redScore = prediction.red_score ?? prediction.redScore ?? data?.red_score;
-    const blueScore = prediction.blue_score ?? prediction.blueScore ?? data?.blue_score;
+    const prediction = data?.pred || {};
+    const redWin = prediction.winProb;
+    const redScore = prediction.redScore;
+    const blueScore = prediction.blueScore;
     if (!Number.isFinite(Number(redWin))) return null;
     const parsed = { redWin:Number(redWin), redScore:Number(redScore), blueScore:Number(blueScore), fetchedAt:Date.now() };
     cache[matchKey] = parsed;
-    localStorage.setItem('tiger-statbotics-matches', JSON.stringify(cache));
+    localStorage.setItem('tiger-match13-matches', JSON.stringify(cache));
     return parsed;
   } catch { return null; }
   finally { clearTimeout(timeout); }
 }
 
-async function syncAllStatboticsTeams() {
-  const status = document.querySelector('#statboticsTeamsStatus') || { textContent:'', className:'' };
-  if (localStorage.getItem('tiger-statbotics-enabled') !== 'yes') {
-    status.textContent = 'Enable Statbotics first.';
+async function syncAllMatch13Teams() {
+  const status = document.querySelector('#match13TeamsStatus') || { textContent:'', className:'' };
+  if (!match13Enabled()) {
+    status.textContent = 'Enable Match13 first.';
     status.className = 'sync-status error';
     return;
   }
@@ -1126,62 +1129,87 @@ async function syncAllStatboticsTeams() {
   const selectedEvent = localStorage.getItem('tiger-selected-event') || 'all';
   const eventRecords = selectedEvent === 'all' ? allRecords : allRecords.filter(record => (record.event || 'Unspecified event') === selectedEvent);
   const teams = [...new Set(eventRecords.map(record => String(record.team)).filter(Boolean))];
-  const results = statboticsTeamMap();
+  const results = match13TeamMap();
   let completed = 0;
   let saved = 0;
   status.className = 'sync-status working';
-  for (let index = 0; index < teams.length; index += 5) {
-    const batch = teams.slice(index,index+5);
-    const responses = await Promise.all(batch.map(team => fetchStatboticsTeam(team)));
-    responses.forEach((result, offset) => {
-      completed++;
-      if (!result) return;
-      results[batch[offset]] = {...result, fetchedAt:Date.now()};
-      saved++;
-    });
-    status.textContent = `Checked ${completed} of ${teams.length} teams…`;
+  const eventKey = localStorage.getItem('tiger-tba-event') || '';
+  if (eventKey) {
+    try {
+      const response = await fetch(`/api/match13/event?eventKey=${encodeURIComponent(eventKey)}`, { headers:{Accept:'application/json'} });
+      if (response.ok) {
+        const eventData = await response.json();
+        const ranked = [...(eventData.teams || [])].sort((a,b) => Number(b.xpEnd || 0) - Number(a.xpEnd || 0));
+        ranked.forEach((teamData, index) => {
+          const parsed = parseMatch13Team(teamData, index + 1);
+          if (!parsed || !teamData.teamNumber) return;
+          results[String(teamData.teamNumber)] = {...parsed, fetchedAt:Date.now(), eventKey};
+          saved++;
+        });
+        completed = ranked.length;
+      }
+    } catch {}
   }
-  localStorage.setItem('tiger-statbotics-teams', JSON.stringify(results));
-  status.textContent = `Saved EPA data for ${saved} of ${teams.length} teams. Unavailable teams were ignored.`;
+  if (!saved) {
+    for (let index = 0; index < teams.length; index += 5) {
+      const batch = teams.slice(index,index+5);
+      const responses = await Promise.all(batch.map(team => fetchMatch13Team(team, localStorage.getItem('tiger-tba-year') || '2026')));
+      responses.forEach((result, offset) => {
+        completed++;
+        if (!result) return;
+        results[batch[offset]] = {...result, fetchedAt:Date.now()};
+        saved++;
+      });
+      status.textContent = `Checked ${completed} of ${teams.length} teams…`;
+    }
+  }
+  localStorage.setItem('tiger-match13-teams', JSON.stringify(results));
+  status.textContent = `Saved XP data for ${saved} team${saved === 1 ? '' : 's'}. Unavailable teams were ignored.`;
   status.className = saved ? 'sync-status success' : 'sync-status error';
 }
 
-function updateStatboticsIndicator() {
-  const indicator = document.querySelector('#statboticsIndicator');
+function updateMatch13Indicator() {
+  const indicator = document.querySelector('#match13Indicator');
   if (!indicator) return;
-  const availability = statboticsAvailability();
+  const availability = match13Availability();
   indicator.className = `availability-badge ${availability.state}`;
   indicator.innerHTML = `<i></i>${availability.label}`;
 }
 
-async function syncStatbotics() {
-  const status = document.querySelector('#statboticsStatus') || { textContent:'', className:'' };
-  if (localStorage.getItem('tiger-statbotics-enabled') !== 'yes') {
-    status.textContent = 'Enable Statbotics first.';
+async function syncMatch13() {
+  const status = document.querySelector('#match13Status') || { textContent:'', className:'' };
+  if (!match13Enabled()) {
+    status.textContent = 'Enable Match13 first.';
     return;
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
-  status.textContent = 'Checking Statbotics…';
+  status.textContent = 'Checking Match13…';
   status.className = 'sync-status working';
   try {
-    const response = await fetch('https://api.statbotics.io/v3/team_year/9072/2026', {
+    const response = await fetch(`/api/match13/team?team=9072&year=${encodeURIComponent(localStorage.getItem('tiger-tba-year') || '2026')}`, {
       signal: controller.signal,
       headers: { Accept:'application/json' }
     });
-    if (!response.ok) throw new Error('Unavailable');
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Unavailable');
+    }
     const data = await response.json();
-    const parsed = parseStatboticsTeam(data);
-    if (!parsed) throw new Error('EPA missing');
+    const parsed = parseMatch13Team(data);
+    if (!parsed) throw new Error('XP missing');
     const cached = { available:true, ...parsed, fetchedAt:Date.now() };
-    localStorage.setItem('tiger-statbotics-9072', JSON.stringify(cached));
-    updateStatboticsIndicator();
-    status.textContent = `Available • EPA ${cached.epa.toFixed(1)}${cached.rank ? ` • Rank #${cached.rank}` : ''}`;
+    localStorage.setItem('tiger-match13-9072', JSON.stringify(cached));
+    const teams = match13TeamMap();
+    teams['9072'] = cached;
+    localStorage.setItem('tiger-match13-teams', JSON.stringify(teams));
+    updateMatch13Indicator();
+    status.textContent = `Available • XP ${cached.xp.toFixed(1)}${cached.rank ? ` • Rank #${cached.rank}` : ''}`;
     status.className = 'sync-status success';
-  } catch {
-    localStorage.setItem('tiger-statbotics-9072', JSON.stringify({ available:false, fetchedAt:Date.now() }));
-    updateStatboticsIndicator();
-    status.textContent = 'Statbotics is unavailable. Its data will be ignored.';
+  } catch (error) {
+    localStorage.setItem('tiger-match13-9072', JSON.stringify({ available:false, fetchedAt:Date.now() }));
+    updateMatch13Indicator();
+    status.textContent = error.message === 'Match13 is not configured.' ? error.message : 'Match13 is unavailable. Its data will be ignored.';
     status.className = 'sync-status';
   } finally {
     clearTimeout(timeout);
@@ -1403,7 +1431,7 @@ async function buildMatchPrepPacket(prep) {
   let schedule = [];
   try { schedule = JSON.parse(localStorage.getItem('tiger-tba-schedule') || '[]'); } catch {}
   const relevantSchedule = schedule.filter(match => [...(match.red || []), ...(match.blue || [])].some(team => teamSet.has(String(team))));
-  const analytics = statboticsTeamMap();
+  const analytics = match13TeamMap();
   const relevantAnalytics = Object.fromEntries(relevantTeams.filter(team => analytics[team]).map(team => [team, analytics[team]]));
   return {
     v: 2,
@@ -1515,8 +1543,8 @@ async function importMatchPrepPacketChunk(payload) {
       await db.put('records', record);
       added++;
     }
-    const analytics = { ...statboticsTeamMap(), ...(packet.teamAnalytics || {}) };
-    localStorage.setItem('tiger-statbotics-teams', JSON.stringify(analytics));
+    const analytics = { ...match13TeamMap(), ...(packet.teamAnalytics || {}) };
+    localStorage.setItem('tiger-match13-teams', JSON.stringify(analytics));
     const prep = saveMatchPrepSnapshot({
       ...packet.prep,
       competition: packet.competition,
@@ -1556,7 +1584,7 @@ async function renderMatchPrep() {
   let selectedKey = localStorage.getItem('tiger-matchprep-match') || teamMatches.find(match => match.redScore < 0 && match.blueScore < 0)?.key || teamMatches[0]?.key || '';
   if (!teamMatches.some(match => match.key === selectedKey)) selectedKey = teamMatches[0]?.key || '';
   const match = teamMatches.find(item => item.key === selectedKey);
-  const statboticsPrediction = match ? await fetchStatboticsMatch(match.key) : null;
+  const match13Prediction = match ? await fetchMatch13Match(match.key) : null;
   const projection = team => {
     const samples = eventRecords.filter(record => String(record.team) === String(team));
     return samples.length ? samples.reduce((sum, record) => sum + score(record), 0) / samples.length : 0;
@@ -1626,7 +1654,7 @@ async function renderMatchPrep() {
     </section>
     ${match ? `<section class="match-readout">
       <div class="win-readout ${winChance>=65?'favored':winChance<=35?'underdog':'even'}"><p class="eyebrow">QUALIFICATION ${match.number}</p><strong>${winChance}%</strong><h2>${outcome}</h2><p>Projected ${ourScore.toFixed(1)}–${opponentScore.toFixed(1)} for Team ${escapeHtml(selectedTeam)}'s alliance.</p></div>
-      ${statboticsPrediction ? `<div class="statbotics-prediction"><div><p class="eyebrow">STATBOTICS PREDICTION</p><h3>${selectedRed ? Math.round(statboticsPrediction.redWin*100) : Math.round((1-statboticsPrediction.redWin)*100)}% win chance</h3></div><strong>${selectedRed ? statboticsPrediction.redScore.toFixed(1) : statboticsPrediction.blueScore.toFixed(1)}–${selectedRed ? statboticsPrediction.blueScore.toFixed(1) : statboticsPrediction.redScore.toFixed(1)}</strong><small>Statbotics projected score</small></div>` : ''}
+      ${match13Prediction ? `<div class="match13-prediction"><div><p class="eyebrow">MATCH13 FORECAST</p><h3>${selectedRed ? Math.round(match13Prediction.redWin*100) : Math.round((1-match13Prediction.redWin)*100)}% win chance</h3></div><strong>${selectedRed ? match13Prediction.redScore.toFixed(1) : match13Prediction.blueScore.toFixed(1)}–${selectedRed ? match13Prediction.blueScore.toFixed(1) : match13Prediction.redScore.toFixed(1)}</strong><small>Match13 projected score</small></div>` : ''}
       <div class="alliance-projection red-projection"><div><p class="eyebrow">RED ALLIANCE</p><strong>${redProjected.toFixed(1)}</strong></div>${match.red.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <div class="alliance-projection blue-projection"><div><p class="eyebrow">BLUE ALLIANCE</p><strong>${blueProjected.toFixed(1)}</strong></div>${match.blue.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <p class="projection-note">Projection uses average points from locally available scouting records. Teams without records are shown as 0.0 and reduce confidence.</p>
@@ -1777,16 +1805,16 @@ function renderSettings() {
         <button id="syncTbaSeason" class="secondary">Pull 9072 season win rate</button>
         <div id="tbaSeasonStatus" class="sync-status">${tbaSeasonStatusText()}</div>
       </article>
-      <article class="settings-card statbotics-settings" hidden aria-hidden="true">
-        <div class="connection-title"><span class="connection-logo statbotics">SB</span><div><h2>Statbotics</h2><p>Optional EPA and EPA ranking for Team 9072</p></div></div>
-        ${(() => { const availability = statboticsAvailability(); return `<div id="statboticsIndicator" class="availability-badge ${availability.state}"><i></i>${availability.label}</div>`; })()}
-        <label class="check"><input id="statboticsEnabled" type="checkbox" ${localStorage.getItem('tiger-statbotics-enabled')==='yes'?'checked':''}><span>Use Statbotics when available</span></label>
-        <p class="privacy-note">Requests time out after eight seconds. If Statbotics is down, Tiger Scout ignores its data and continues normally.</p>
-        <button id="syncStatbotics" class="secondary">Check Statbotics now</button>
-        <div id="statboticsStatus" class="sync-status">${statboticsStatusText()}</div>
+      <article class="settings-card match13-settings" hidden aria-hidden="true">
+        <div class="connection-title"><span class="connection-logo match13">M13</span><div><h2>Match13</h2><p>Optional XP and XP ranking for Team 9072</p></div></div>
+        ${(() => { const availability = match13Availability(); return `<div id="match13Indicator" class="availability-badge ${availability.state}"><i></i>${availability.label}</div>`; })()}
+        <label class="check"><input id="match13Enabled" type="checkbox" ${match13Enabled()?'checked':''}><span>Use Match13 when available</span></label>
+        <p class="privacy-note">Requests use the hosted private connection and time out after eight seconds. If Match13 is down, Tiger Scout ignores its data and continues normally.</p>
+        <button id="syncMatch13" class="secondary">Check Match13 now</button>
+        <div id="match13Status" class="sync-status">${match13StatusText()}</div>
         <div class="settings-divider"></div>
-        <button id="syncAllStatbotics" class="secondary">Pull EPA for dataset teams</button>
-        <div id="statboticsTeamsStatus" class="sync-status">${Object.keys(statboticsTeamMap()).length ? `${Object.keys(statboticsTeamMap()).length} team EPA records cached.` : 'No dataset team EPA records cached yet.'}</div>
+        <button id="syncAllMatch13" class="secondary">Pull XP for dataset teams</button>
+        <div id="match13TeamsStatus" class="sync-status">${Object.keys(match13TeamMap()).length ? `${Object.keys(match13TeamMap()).length} team XP records cached.` : 'No dataset team XP records cached yet.'}</div>
       </article>
       <article class="settings-card">
         <div class="connection-title"><span class="connection-logo tiger">9072</span><div><h2>Team logos</h2><p>Download team avatars for the current dataset</p></div></div>
@@ -1813,15 +1841,15 @@ function renderSettings() {
   document.querySelector('#syncTba').onclick = async () => { save(); await syncTbaEvent(); };
   document.querySelector('#syncTbaSeason').onclick = async () => { save(); await syncTbaSeasonRecord(); };
   document.querySelector('#downloadLogos').onclick = async () => { save(); await downloadTeamLogos(); };
-  document.querySelector('#statboticsEnabled').onchange = event => {
-    localStorage.setItem('tiger-statbotics-enabled', event.target.checked ? 'yes' : 'no');
-    if (!event.target.checked) localStorage.removeItem('tiger-statbotics-9072');
-    updateStatboticsIndicator();
-    document.querySelector('#statboticsStatus').textContent = event.target.checked ? 'Enabled; checking availability…' : 'Statbotics is disabled.';
-    if (event.target.checked) syncStatbotics();
+  document.querySelector('#match13Enabled').onchange = event => {
+    localStorage.setItem('tiger-match13-enabled', event.target.checked ? 'yes' : 'no');
+    if (!event.target.checked) localStorage.removeItem('tiger-match13-9072');
+    updateMatch13Indicator();
+    document.querySelector('#match13Status').textContent = event.target.checked ? 'Enabled; checking availability…' : 'Match13 is disabled.';
+    if (event.target.checked) syncMatch13();
   };
-  document.querySelector('#syncStatbotics').onclick = syncStatbotics;
-  document.querySelector('#syncAllStatbotics').onclick = syncAllStatboticsTeams;
+  document.querySelector('#syncMatch13').onclick = syncMatch13;
+  document.querySelector('#syncAllMatch13').onclick = syncAllMatch13Teams;
   document.querySelector('#saveSqlSync').onclick = () => {
     localStorage.setItem('tiger-sql-token', document.querySelector('#sqlSyncToken').value.trim());
     toast('Database sync token saved on this device.');
@@ -2580,7 +2608,7 @@ async function showTeam(team, rs) {
   const logos = await teamLogoMap();
   const db = await dbPromise;
   const savedPhoto = await db.get('assets', `team-photo-${team}`);
-  const teamStatbotics = statboticsTeamMap()[String(team)];
+  const teamMatch13 = match13TeamMap()[String(team)];
   const sorted = [...rs].sort((a,b)=>Number(a.match)-Number(b.match));
   const totals = sorted.map(r => Number(r.autoFuel || 0) + Number(r.teleFuel || 0));
   const pointTotals = sorted.map(record => score(record));
@@ -2602,8 +2630,8 @@ async function showTeam(team, rs) {
         <span><strong>${minimumPoints.toFixed(0)}</strong><small>MIN PTS</small></span>
         <span class="average"><strong>${averagePoints.toFixed(1)}</strong><small>AVG PTS</small></span>
         <span><strong>${maximumPoints.toFixed(0)}</strong><small>MAX PTS</small></span>
-        ${teamStatbotics ? `<span><strong>${Number(teamStatbotics.epa).toFixed(1)}</strong><small>EPA</small></span>
-        <span><strong>${teamStatbotics.rank ? `#${escapeHtml(teamStatbotics.rank)}` : '—'}</strong><small>EPA RANK</small></span>` : ''}
+        ${teamMatch13 ? `<span><strong>${Number(teamMatch13.xp).toFixed(1)}</strong><small>XP</small></span>
+        <span><strong>${teamMatch13.rank ? `#${escapeHtml(teamMatch13.rank)}` : '—'}</strong><small>XP RANK</small></span>` : ''}
       </div>
     </section>
     <section class="team-photo-card">
@@ -2788,8 +2816,11 @@ async function initialize() {
     await syncSqlDatabase();
     await go('data');
   }
-  if (navigator.onLine && localStorage.getItem('tiger-statbotics-enabled') === 'yes') {
-    setTimeout(syncStatbotics, 250);
+  if (navigator.onLine && match13Enabled()) {
+    setTimeout(async () => {
+      await syncMatch13();
+      await syncAllMatch13Teams();
+    }, 250);
   }
 }
 window.addEventListener('online', async () => {

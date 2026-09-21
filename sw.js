@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v31-iphone-camera-fallback';
+const CACHE = 'tiger-scout-v32-match13-xp';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',

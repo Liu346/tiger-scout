@@ -75,6 +75,49 @@ async function fetchCriMatches(env) {
   return json(Array.isArray(matches) ? matches : []);
 }
 
+async function fetchMatch13(request, env, kind) {
+  if (!env.MATCH13_API_KEY) return json({ error: 'Match13 is not configured.' }, 503);
+  const url = new URL(request.url);
+  let upstreamPath = '';
+  let cacheSeconds = 300;
+  if (kind === 'team') {
+    const team = url.searchParams.get('team') || '';
+    const year = Number(url.searchParams.get('year'));
+    if (!/^\d{1,5}$/.test(team) || !Number.isInteger(year) || year < 1992 || year > new Date().getUTCFullYear() + 1) {
+      return json({ error: 'Enter a valid team number and season.' }, 400);
+    }
+    upstreamPath = `/v1/teams/${team}/years/${year}?scope=all`;
+    cacheSeconds = 900;
+  } else if (kind === 'event') {
+    const eventKey = (url.searchParams.get('eventKey') || '').toLowerCase();
+    if (!/^\d{4}[a-z0-9]{2,20}$/.test(eventKey)) return json({ error: 'Enter a valid event key.' }, 400);
+    upstreamPath = `/v1/events/${eventKey}/teams`;
+  } else if (kind === 'match') {
+    const matchKey = (url.searchParams.get('matchKey') || '').toLowerCase();
+    if (!/^\d{4}[a-z0-9]{2,20}_(?:qm\d+|[a-z]{1,3}\d+m\d+)$/.test(matchKey)) {
+      return json({ error: 'Enter a valid match key.' }, 400);
+    }
+    upstreamPath = `/v1/matches/${matchKey}?scope=all`;
+  }
+  const upstream = await fetch(`https://actions.match13.com${upstreamPath}`, {
+    headers: { Authorization: `Bearer ${env.MATCH13_API_KEY}`, Accept: 'application/json' }
+  });
+  if (!upstream.ok) {
+    const retryAfter = upstream.headers.get('retry-after');
+    const message = upstream.status === 429
+      ? `Match13 rate limit reached${retryAfter ? `; retry after ${retryAfter} seconds` : ''}.`
+      : `Match13 returned ${upstream.status}.`;
+    return json({ error: message }, upstream.status);
+  }
+  return new Response(await upstream.text(), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': `public, max-age=${cacheSeconds}`
+    }
+  });
+}
+
 function selectRobotPhoto(media) {
   const supportedTypes = new Set(['imgur', 'cdphotothread', 'instagram-image']);
   return (Array.isArray(media) ? media : [])
@@ -147,6 +190,18 @@ export default {
       if (url.pathname === '/api/tba/team-photo' && request.method === 'GET') {
         try { return await fetchTeamPhoto(request, env); }
         catch { return json({ error: 'Could not download the team photo.' }, 502); }
+      }
+      if (url.pathname === '/api/match13/team' && request.method === 'GET') {
+        try { return await fetchMatch13(request, env, 'team'); }
+        catch { return json({ error: 'Could not reach Match13.' }, 502); }
+      }
+      if (url.pathname === '/api/match13/event' && request.method === 'GET') {
+        try { return await fetchMatch13(request, env, 'event'); }
+        catch { return json({ error: 'Could not reach Match13.' }, 502); }
+      }
+      if (url.pathname === '/api/match13/match' && request.method === 'GET') {
+        try { return await fetchMatch13(request, env, 'match'); }
+        catch { return json({ error: 'Could not reach Match13.' }, 502); }
       }
       if (!authorized(request, env)) return json({ error: 'Unauthorized' }, 401);
       try {

@@ -99,7 +99,7 @@ The editor can change rates and durations and recalculates their estimates.
 Team rankings focus on the highest recorded scoring flow rate (**Peak BSP**) and
 average estimated points. The variance chart shows each leading team's standard
 deviation in points; a lower bar means its match scoring has been more
-predictable. EPA, EPA rank, tower rate, and consistency are hidden from this
+predictable. Match13 XP, XP rank, tower rate, and consistency are hidden from this
 readout to keep the competition view focused.
 
 ## Protected data editor
@@ -111,8 +111,11 @@ editing for every scouting record. The password can be changed in Settings.
 All libraries are bundled under `public/vendor`. Scouting, Match Prep handoff,
 and QR transfer make no internet requests. Optional cloud synchronization only
 runs when a user presses **Sync database**. Notes, Pre-Scouting, Compare, and
-the Statbotics settings card are currently hidden without deleting their saved
-device data.
+the Match13 settings card are currently hidden without deleting their saved
+device data. Match13 XP replaces Statbotics EPA on Team 9072's home spotlight,
+team profiles, Match Prep forecasts, and the six-team Match Prep QR packet. The
+hosted Worker keeps `MATCH13_API_KEY` private and the app ignores Match13 data
+when that service is unavailable.
 
 ## ChatGPT Sites hosting
 
@@ -120,8 +123,8 @@ Tiger Scout reuses the former Blackjack Move Lab Site. Its binding is recorded
 in `.openai/hosting.json`; do not create a second Site for future deployments.
 Run `npm run build` to produce its Worker and verified offline assets. The Sites
 build plugin includes the hosting metadata and generated Drizzle migrations.
-Sites manages the `DB` database; `SYNC_TOKEN` is a private runtime secret, not
-part of the deployed browser code.
+Sites manages the `DB` database; `SYNC_TOKEN` and `MATCH13_API_KEY` are private
+runtime secrets, not part of the deployed browser code.
 
 Opening the new address starts a separate device-local store. Export a JSON
 backup from the old address and import it on the new one to bring scouting

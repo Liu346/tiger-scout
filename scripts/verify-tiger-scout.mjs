@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const release = resolve(dirname(fileURLToPath(import.meta.url)), '../outputs/TigerScoutRelease');
-const origin = 'https://tiger-scout.jacobliu1239.workers.dev';
+const origin = 'https://tiger-scout-9072.jacobliu1239.chatgpt.site';
 const names = readdirSync(release, { recursive: true }).filter(name => statSync(resolve(release, name)).isFile());
 await Promise.all(names.map(async name => {
   const path = name.replaceAll('\\', '/');
