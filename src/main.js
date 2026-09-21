@@ -2608,7 +2608,19 @@ async function showTeam(team, rs) {
   const logos = await teamLogoMap();
   const db = await dbPromise;
   const savedPhoto = await db.get('assets', `team-photo-${team}`);
-  const teamMatch13 = match13TeamMap()[String(team)];
+  let teamMatch13 = match13TeamMap()[String(team)];
+  if (!teamMatch13 && navigator.onLine && match13Enabled()) {
+    const freshMatch13 = await fetchMatch13Team(team, localStorage.getItem('tiger-tba-year') || '2026');
+    if (freshMatch13) {
+      const analytics = match13TeamMap();
+      teamMatch13 = { ...freshMatch13, fetchedAt:Date.now() };
+      analytics[String(team)] = teamMatch13;
+      localStorage.setItem('tiger-match13-teams', JSON.stringify(analytics));
+    }
+  }
+  const match13Components = teamMatch13
+    ? Object.entries(teamMatch13.components || {}).filter(([, value]) => Number.isFinite(Number(value)))
+    : [];
   const sorted = [...rs].sort((a,b)=>Number(a.match)-Number(b.match));
   const totals = sorted.map(r => Number(r.autoFuel || 0) + Number(r.teleFuel || 0));
   const pointTotals = sorted.map(record => score(record));
@@ -2633,6 +2645,22 @@ async function showTeam(team, rs) {
         ${teamMatch13 ? `<span><strong>${Number(teamMatch13.xp).toFixed(1)}</strong><small>XP</small></span>
         <span><strong>${teamMatch13.rank ? `#${escapeHtml(teamMatch13.rank)}` : '—'}</strong><small>XP RANK</small></span>` : ''}
       </div>
+    </section>
+    <section class="team-match13-card ${teamMatch13 ? 'available' : 'unavailable'}">
+      <div class="team-match13-head">
+        <div><p class="eyebrow">MATCH13 ANALYTICS</p><h2>${teamMatch13 ? `Team ${escapeHtml(team)} XP profile` : 'XP data unavailable'}</h2><p>${teamMatch13 ? 'Expected contribution and phase estimates from Match13.' : 'No Match13 record is cached for this team. Connect to the internet and try again.'}</p></div>
+        <button id="refreshTeamMatch13" class="secondary" type="button" ${navigator.onLine && match13Enabled() ? '' : 'disabled'}>${teamMatch13 ? 'Refresh XP' : 'Try Match13'}</button>
+      </div>
+      ${teamMatch13 ? `<div class="team-match13-metrics">
+        <span class="primary-metric"><strong>${Number(teamMatch13.xp).toFixed(1)}</strong><small>XP</small></span>
+        <span><strong>${teamMatch13.rank ? `#${escapeHtml(teamMatch13.rank)}` : '—'}</strong><small>XP RANK</small></span>
+        <span><strong>${Number(teamMatch13.autoXp || 0).toFixed(1)}</strong><small>AUTO XP</small></span>
+        <span><strong>${Number(teamMatch13.teleopXp || 0).toFixed(1)}</strong><small>TELEOP XP</small></span>
+        <span><strong>${Number(teamMatch13.endgameXp || 0).toFixed(1)}</strong><small>ENDGAME XP</small></span>
+        <span><strong>${Number(teamMatch13.variance || 0).toFixed(1)}</strong><small>XP VARIANCE</small></span>
+        ${Number(teamMatch13.normXp || 0) ? `<span><strong>${Number(teamMatch13.normXp).toFixed(0)}</strong><small>NORMALIZED XP</small></span>` : ''}
+        ${match13Components.map(([name, value]) => `<span><strong>${Number(value).toFixed(1)}</strong><small>${escapeHtml(String(name).replace(/([a-z])([A-Z])/g, '$1 $2').toUpperCase())}</small></span>`).join('')}
+      </div><small class="team-match13-source">${teamMatch13.eventKey ? `Event XP from ${escapeHtml(teamMatch13.eventKey)}` : '2026 season XP'}${teamMatch13.fetchedAt ? ` · Updated ${new Date(teamMatch13.fetchedAt).toLocaleString()}` : ''}</small>` : '<div class="team-match13-empty"><span>M13</span><p>Tiger Scout will continue using local scouting averages while Match13 is unavailable.</p></div>'}
     </section>
     <section class="team-photo-card">
       <div class="team-photo-preview">${savedPhoto?.dataUrl ? `<img src="${escapeHtml(savedPhoto.dataUrl)}" alt="Saved robot photo for Team ${escapeHtml(team)}">` : '<span>No team photo saved</span>'}</div>
@@ -2665,6 +2693,24 @@ async function showTeam(team, rs) {
     } catch {
       toast('That photo could not be saved.', true);
     }
+  };
+  document.querySelector('#refreshTeamMatch13').onclick = async event => {
+    const button = event.currentTarget;
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Loading XP…';
+    const freshMatch13 = await fetchMatch13Team(team, localStorage.getItem('tiger-tba-year') || '2026');
+    if (!freshMatch13) {
+      toast('Match13 data is not available right now.', true);
+      button.disabled = false;
+      button.textContent = originalText;
+      return;
+    }
+    const analytics = match13TeamMap();
+    analytics[String(team)] = { ...freshMatch13, fetchedAt:Date.now() };
+    localStorage.setItem('tiger-match13-teams', JSON.stringify(analytics));
+    toast(`Match13 XP updated for Team ${team}.`);
+    await showTeam(team, rs);
   };
   document.querySelector('#pullTeamPhotoTba').onclick = async event => {
     if (!navigator.onLine) {

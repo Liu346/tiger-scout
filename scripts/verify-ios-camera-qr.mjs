@@ -22,6 +22,6 @@ assert.match(source, /wireQrImageInput\(document\.querySelector\('#qrCameraFile'
 assert.match(source, /wireQrImageInput\(document\.querySelector\('#eventQrCameraFile'\), importEventSetupPayload/);
 assert.match(source, /Camera permission is blocked/);
 assert.match(css, /@media\(max-width:520px\)\{\.scanner-controls,\.qr-image-options\{grid-template-columns:1fr\}\}/);
-assert.match(worker, /tiger-scout-v32-match13-xp/);
+assert.match(worker, /tiger-scout-v33-match13-team-view/);
 
 console.log('iPhone camera choices, ideal-constraint live video, native QR-photo fallback, screenshot decoder, and mobile layout verified.');

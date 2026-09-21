@@ -13,7 +13,13 @@ assert.match(source, /tiger-match13-teams/);
 assert.match(source, /teamAnalytics: relevantAnalytics/);
 assert.match(workerSource, /https:\/\/actions\.match13\.com/);
 assert.match(workerSource, /Bearer \$\{env\.MATCH13_API_KEY\}/);
-assert.match(serviceWorker, /tiger-scout-v32-match13-xp/);
+assert.match(serviceWorker, /tiger-scout-v33-match13-team-view/);
+assert.match(source, /team-match13-card/);
+assert.match(source, /AUTO XP/);
+assert.match(source, /TELEOP XP/);
+assert.match(source, /ENDGAME XP/);
+assert.match(source, /XP VARIANCE/);
+assert.match(source, /refreshTeamMatch13/);
 
 const { default: worker } = await import('../dist/server/index.js');
 const calls = [];
