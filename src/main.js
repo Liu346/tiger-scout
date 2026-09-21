@@ -112,6 +112,11 @@ async function scanQrImageFile(file) {
 }
 
 async function startQrCamera(video, onDecode, cameraSelect) {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const error = new Error('Live camera access is not supported in this browser.');
+    error.name = 'CameraUnsupportedError';
+    throw error;
+  }
   if (scanner) {
     await scanner.stop();
     scanner.destroy();
@@ -121,23 +126,52 @@ async function startQrCamera(video, onDecode, cameraSelect) {
   const choices = [requested, requested === 'environment' ? 'user' : 'environment'];
   let lastError;
   for (const camera of choices) {
+    let stream;
     try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: camera }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
       scanner = new QrScanner(video, onDecode, {
         highlightScanRegion: true,
         highlightCodeOutline: true,
         preferredCamera: camera,
         returnDetailedScanResult: true
       });
+      video.setAttribute('playsinline', '');
+      video.setAttribute('webkit-playsinline', '');
+      video.muted = true;
+      video.srcObject = stream;
       await scanner.start();
       if (cameraSelect) cameraSelect.value = camera;
       return camera;
     } catch (error) {
       lastError = error;
+      stream?.getTracks().forEach(track => track.stop());
       scanner?.destroy();
       scanner = null;
+      video.srcObject = null;
+      if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') break;
     }
   }
   throw lastError || new Error('No camera is available.');
+}
+
+function cameraFailureMessage(error) {
+  if (!window.isSecureContext) return 'Live camera needs Safari on the secure Tiger Scout site. Use the QR photo button below for now.';
+  if (!navigator.mediaDevices?.getUserMedia || error?.name === 'CameraUnsupportedError') return 'This browser cannot open live video. Open Tiger Scout directly in Safari, or use the QR photo button below.';
+  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return 'Camera permission is blocked. Allow Camera for Tiger Scout in Safari settings, reopen the app, or use the QR photo button below.';
+  if (error?.name === 'NotReadableError' || error?.name === 'AbortError') return 'The camera is busy. Close other camera apps and try again, or use the QR photo button below.';
+  return 'The live camera could not start on this device. Use the QR photo button below to take and scan a picture instead.';
+}
+
+function wireQrImageInput(input, onPayload, failureMessage) {
+  if (!input) return;
+  input.onchange = async event => {
+    try { await onPayload(await scanQrImageFile(event.target.files?.[0])); }
+    catch { toast(failureMessage, true); }
+    finally { event.target.value = ''; }
+  };
 }
 
 function wireCameraSelect(select) {
@@ -565,9 +599,10 @@ function renderEventCreator() {
       </form>
       <section class="event-join-card">
         <p class="eyebrow">JOIN EVENT</p><h2>Scan an event setup</h2><p>Use the camera or a screenshot from the event lead. Scanning immediately selects the event and preloads its team list.</p>
-        <div id="eventReader"><video playsinline muted></video><div class="scan-frame"></div></div>
+        <div id="eventReader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"></div></div>
         <div class="scanner-controls"><button id="startEventScan" class="primary">Start camera</button><label>Camera<select id="eventCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
-        <label class="upload">Scan from screenshot<input id="eventQrFile" type="file" accept="image/*"></label>
+        <div id="eventCameraStatus" class="camera-help" hidden></div>
+        <div class="qr-image-options"><label class="upload native-camera">Take a QR photo<input id="eventQrCameraFile" type="file" accept="image/*" capture="environment"></label><label class="upload">Choose QR photo or screenshot<input id="eventQrFile" type="file" accept="image/*"></label></div>
         <details><summary>Camera unavailable? Paste event payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import event</button></details>
       </section>
     </section>
@@ -592,16 +627,19 @@ function renderEventCreator() {
   const cameraSelect = document.querySelector('#eventCamera');
   wireCameraSelect(cameraSelect);
   document.querySelector('#startEventScan').onclick = async () => {
+    const status = document.querySelector('#eventCameraStatus');
     try {
       await startQrCamera(video, result => importEventSetupPayload(result.data), cameraSelect);
       document.querySelector('#startEventScan').hidden = true;
-    } catch { toast('Camera could not start. Try a screenshot instead.', true); }
+      status.hidden = true;
+    } catch (error) {
+      status.textContent = cameraFailureMessage(error);
+      status.hidden = false;
+      toast('Live camera unavailable — use a QR photo below.', true);
+    }
   };
-  document.querySelector('#eventQrFile').onchange = async event => {
-    try { await importEventSetupPayload(await scanQrImageFile(event.target.files?.[0])); }
-    catch { toast('No event QR code was found in that image.', true); }
-    finally { event.target.value = ''; }
-  };
+  wireQrImageInput(document.querySelector('#eventQrCameraFile'), importEventSetupPayload, 'No event QR code was found in that photo.');
+  wireQrImageInput(document.querySelector('#eventQrFile'), importEventSetupPayload, 'No event QR code was found in that image.');
   document.querySelector('#importEventText').onclick = () => importEventSetupPayload(document.querySelector('#eventPayload').value.trim());
   document.querySelectorAll('[data-use-event]').forEach(button => button.onclick = () => {
     const config = configs.find(event => event.id === button.dataset.useEvent);
@@ -753,9 +791,10 @@ async function renderScan() {
   view.innerHTML = `
     <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, every code in a Match Prep data packet, or a full-device backup. Duplicate records are ignored automatically.</p></section>
     <section class="scanner-card">
-      <div id="reader"><video playsinline muted></video><div class="scan-frame"></div></div>
+      <div id="reader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"></div></div>
       <div class="scanner-controls"><button id="startScan" class="primary">Start camera</button><label>Camera<select id="scanCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
-      <label class="upload">Or scan from a screenshot<input id="qrFile" type="file" accept="image/*"></label>
+      <div id="scanCameraStatus" class="camera-help" hidden></div>
+      <div class="qr-image-options"><label class="upload native-camera">Take a QR photo<input id="qrCameraFile" type="file" accept="image/*" capture="environment"></label><label class="upload">Choose QR photo or screenshot<input id="qrFile" type="file" accept="image/*"></label></div>
       <details><summary>Camera unavailable? Paste payload</summary><textarea id="payload" rows="4"></textarea><button id="importText" class="secondary">Import text</button></details>
       <section class="device-backup">
         <p class="eyebrow">OFFLINE BACKUP</p>
@@ -769,16 +808,19 @@ async function renderScan() {
   const cameraSelect = document.querySelector('#scanCamera');
   wireCameraSelect(cameraSelect);
   document.querySelector('#startScan').onclick = async () => {
+    const status = document.querySelector('#scanCameraStatus');
     try {
       await startQrCamera(video, result => importPayload(result.data), cameraSelect);
       document.querySelector('#startScan').hidden = true;
-    } catch (err) { toast('Camera could not start. Try a screenshot instead.', true); }
+      status.hidden = true;
+    } catch (error) {
+      status.textContent = cameraFailureMessage(error);
+      status.hidden = false;
+      toast('Live camera unavailable — use a QR photo below.', true);
+    }
   };
-  document.querySelector('#qrFile').onchange = async e => {
-    try { await importPayload(await scanQrImageFile(e.target.files?.[0])); }
-    catch { toast('No QR code found in that image.', true); }
-    finally { e.target.value = ''; }
-  };
+  wireQrImageInput(document.querySelector('#qrCameraFile'), importPayload, 'No QR code found in that photo.');
+  wireQrImageInput(document.querySelector('#qrFile'), importPayload, 'No QR code found in that image.');
   document.querySelector('#importText').onclick = () => importPayload(document.querySelector('#payload').value.trim());
   document.querySelector('#createBackupQr').onclick = () => showBackupQrSequence(localRecords);
 }

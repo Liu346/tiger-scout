@@ -45,6 +45,9 @@ On iPhone, the QR camera can switch between the back and front cameras. The
 event setup QRs, scouting records, Match Prep packets, and device backups. Team
 photo pickers use Apple's full camera/photo-library chooser instead of forcing a
 specific lens, which improves compatibility with older phones such as iPhone SE.
+If live video is blocked, **Take a QR photo** opens the native iPhone camera and
+decodes the picture immediately, while **Choose QR photo or screenshot** imports
+an existing image. Both routes work without granting continuous live-video access.
 
 ## Match Prep handoff
 

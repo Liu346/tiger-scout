@@ -492,4 +492,9 @@ tbody tr:hover{background:#25292c}
 .scanner-controls .primary,.scanner-controls select{width:100%;min-height:48px}
 .scanner-controls label{gap:5px}
 .scanner-card>.scanner-controls+.upload,.event-join-card>.scanner-controls+.upload{display:block;width:100%;text-align:center;margin:10px 0}
-@media(max-width:520px){.scanner-controls{grid-template-columns:1fr}}
+.camera-help{margin:10px 0;padding:12px 14px;border:1px solid #8a5633;border-radius:7px;background:#2d1c12;color:#efc39e;font-size:13px;line-height:1.45}
+.camera-help[hidden]{display:none}
+.qr-image-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.qr-image-options .upload{display:grid;place-items:center;text-align:center;min-height:50px}
+.qr-image-options .native-camera{background:var(--mint);border-color:var(--mint);color:#17110d}
+@media(max-width:520px){.scanner-controls,.qr-image-options{grid-template-columns:1fr}}
