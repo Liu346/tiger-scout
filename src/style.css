@@ -508,13 +508,21 @@ tbody tr:hover{background:#25292c}
 }
 
 /* iPhone-friendly camera selection and screenshot import */
-.scanner-controls{display:grid;grid-template-columns:1fr minmax(150px,220px);gap:10px;align-items:end;margin:10px 0}
-.scanner-controls .primary,.scanner-controls select{width:100%;min-height:48px}
+.scanner-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,220px) auto;gap:10px;align-items:end;margin:10px 0}
+.scanner-controls .primary,.scanner-controls select,.scanner-controls .flash-button{width:100%;min-height:48px}
 .scanner-controls label{gap:5px}
+.scanner-card #reader video,.event-join-card #eventReader video{filter:brightness(1.14) contrast(1.18) saturate(.9);object-fit:cover;min-height:100%}
+.scan-frame{inset:8px;border:2px solid rgba(232,229,223,.88);border-radius:6px;box-shadow:inset 0 0 0 1px rgba(201,119,58,.45),0 0 22px rgba(0,0,0,.35)}
+.scan-frame::before,.scan-frame::after{content:"";position:absolute;width:42px;height:42px;border-color:#f0a060}
+.scan-frame::before{left:-2px;top:-2px;border-left:5px solid #f0a060;border-top:5px solid #f0a060;border-radius:6px 0 0}
+.scan-frame::after{right:-2px;bottom:-2px;border-right:5px solid #f0a060;border-bottom:5px solid #f0a060;border-radius:0 0 6px}
+.scan-frame span{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);white-space:nowrap;background:rgba(9,8,7,.82);color:#fff4e9;border:1px solid rgba(240,160,96,.75);border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;letter-spacing:.02em}
+.flash-button[aria-pressed="true"]{background:#fff3d6;color:#17110d;border-color:#ffd06e;box-shadow:0 0 18px rgba(255,208,110,.24)}
+.scanning-active .topbar{background:#070605f5}
 .scanner-card>.scanner-controls+.upload,.event-join-card>.scanner-controls+.upload{display:block;width:100%;text-align:center;margin:10px 0}
 .camera-help{margin:10px 0;padding:12px 14px;border:1px solid #8a5633;border-radius:7px;background:#2d1c12;color:#efc39e;font-size:13px;line-height:1.45}
 .camera-help[hidden]{display:none}
 .qr-image-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
 .qr-image-options .upload{display:grid;place-items:center;text-align:center;min-height:50px}
 .qr-image-options .native-camera{background:var(--mint);border-color:var(--mint);color:#17110d}
-@media(max-width:520px){.scanner-controls,.qr-image-options{grid-template-columns:1fr}}
+@media(max-width:520px){.scanner-controls,.qr-image-options{grid-template-columns:1fr}.scan-frame span{font-size:11px}}

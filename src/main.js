@@ -95,6 +95,7 @@ const blank = () => ({
 
 let draft = blank();
 let scanner;
+let scanWakeLock;
 let chart;
 let editorSearch = '';
 let editorEvent = 'all';
@@ -111,17 +112,60 @@ async function scanQrImageFile(file) {
   return payload.trim();
 }
 
-async function startQrCamera(video, onDecode, cameraSelect) {
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    const error = new Error('Live camera access is not supported in this browser.');
-    error.name = 'CameraUnsupportedError';
-    throw error;
-  }
+function fullVideoScanRegion(video) {
+  const width = video.videoWidth || 1280;
+  const height = video.videoHeight || 720;
+  const scale = Math.min(1, 900 / Math.max(width, height));
+  return {
+    x: 0, y: 0, width, height,
+    downScaledWidth: Math.max(1, Math.round(width * scale)),
+    downScaledHeight: Math.max(1, Math.round(height * scale))
+  };
+}
+
+async function keepScannerScreenAwake() {
+  if (!navigator.wakeLock?.request) return;
+  try { scanWakeLock = await navigator.wakeLock.request('screen'); } catch {}
+}
+
+async function stopQrCamera() {
   if (scanner) {
     await scanner.stop();
     scanner.destroy();
     scanner = null;
   }
+  if (scanWakeLock) {
+    try { await scanWakeLock.release(); } catch {}
+    scanWakeLock = null;
+  }
+  document.body.classList.remove('scanning-active');
+}
+
+async function updateFlashButton(button) {
+  if (!button) return;
+  button.hidden = true;
+  button.onclick = null;
+  if (!scanner || !(await scanner.hasFlash().catch(() => false))) return;
+  const refresh = () => {
+    const enabled = scanner?.isFlashOn() || false;
+    button.textContent = enabled ? 'Turn off flashlight' : 'Turn on flashlight';
+    button.setAttribute('aria-pressed', String(enabled));
+  };
+  button.hidden = false;
+  refresh();
+  button.onclick = async () => {
+    try { await scanner.toggleFlash(); refresh(); }
+    catch { toast('The flashlight is not available on this camera.', true); }
+  };
+}
+
+async function startQrCamera(video, onDecode, cameraSelect, flashButton) {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const error = new Error('Live camera access is not supported in this browser.');
+    error.name = 'CameraUnsupportedError';
+    throw error;
+  }
+  await stopQrCamera();
   const requested = cameraSelect?.value || 'environment';
   const choices = [requested, requested === 'environment' ? 'user' : 'environment'];
   let lastError;
@@ -133,16 +177,22 @@ async function startQrCamera(video, onDecode, cameraSelect) {
         video: { facingMode: { ideal: camera }, width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       scanner = new QrScanner(video, onDecode, {
-        highlightScanRegion: true,
+        calculateScanRegion: fullVideoScanRegion,
+        maxScansPerSecond: 20,
+        highlightScanRegion: false,
         highlightCodeOutline: true,
         preferredCamera: camera,
         returnDetailedScanResult: true
       });
+      scanner.setInversionMode('both');
       video.setAttribute('playsinline', '');
       video.setAttribute('webkit-playsinline', '');
       video.muted = true;
       video.srcObject = stream;
       await scanner.start();
+      document.body.classList.add('scanning-active');
+      await keepScannerScreenAwake();
+      await updateFlashButton(flashButton);
       if (cameraSelect) cameraSelect.value = camera;
       return camera;
     } catch (error) {
@@ -174,11 +224,14 @@ function wireQrImageInput(input, onPayload, failureMessage) {
   };
 }
 
-function wireCameraSelect(select) {
+function wireCameraSelect(select, flashButton) {
   if (!select) return;
   select.onchange = async () => {
     if (!scanner) return;
-    try { await scanner.setCamera(select.value); }
+    try {
+      await scanner.setCamera(select.value);
+      await updateFlashButton(flashButton);
+    }
     catch { toast('That camera is not available on this device.', true); }
   };
 }
@@ -266,7 +319,7 @@ function setActive(page) {
 
 async function go(page) {
   if (page === 'scout' && appMode() === 'database') page = 'data';
-  if (scanner) { scanner.stop(); scanner.destroy(); scanner = null; }
+  await stopQrCamera();
   if (chart) { chart.destroy(); chart = null; }
   if (page === 'editor' && !adminUnlocked()) {
     toast('Enter the editor password in Settings.', true);
@@ -599,8 +652,8 @@ function renderEventCreator() {
       </form>
       <section class="event-join-card">
         <p class="eyebrow">JOIN EVENT</p><h2>Scan an event setup</h2><p>Use the camera or a screenshot from the event lead. Scanning immediately selects the event and preloads its team list.</p>
-        <div id="eventReader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"></div></div>
-        <div class="scanner-controls"><button id="startEventScan" class="primary">Start camera</button><label>Camera<select id="eventCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
+        <div id="eventReader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"><span>QR can be anywhere in this view</span></div></div>
+        <div class="scanner-controls"><button id="startEventScan" class="primary">Start camera</button><label>Camera<select id="eventCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label><button id="eventFlash" class="secondary flash-button" type="button" aria-pressed="false" hidden>Turn on flashlight</button></div>
         <div id="eventCameraStatus" class="camera-help" hidden></div>
         <div class="qr-image-options"><label class="upload native-camera">Take a QR photo<input id="eventQrCameraFile" type="file" accept="image/*" capture="environment"></label><label class="upload">Choose QR photo or screenshot<input id="eventQrFile" type="file" accept="image/*"></label></div>
         <details><summary>Camera unavailable? Paste event payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import event</button></details>
@@ -625,11 +678,12 @@ function renderEventCreator() {
   };
   const video = document.querySelector('#eventReader video');
   const cameraSelect = document.querySelector('#eventCamera');
-  wireCameraSelect(cameraSelect);
+  const flashButton = document.querySelector('#eventFlash');
+  wireCameraSelect(cameraSelect, flashButton);
   document.querySelector('#startEventScan').onclick = async () => {
     const status = document.querySelector('#eventCameraStatus');
     try {
-      await startQrCamera(video, result => importEventSetupPayload(result.data), cameraSelect);
+      await startQrCamera(video, result => importEventSetupPayload(result.data), cameraSelect, flashButton);
       document.querySelector('#startEventScan').hidden = true;
       status.hidden = true;
     } catch (error) {
@@ -791,8 +845,8 @@ async function renderScan() {
   view.innerHTML = `
     <section class="pagehead"><p class="eyebrow">COLLECTOR MODE</p><h1>Scan a Tiger Scout QR</h1><p>Collect a scouting record, every code in a Match Prep data packet, or a full-device backup. Duplicate records are ignored automatically.</p></section>
     <section class="scanner-card">
-      <div id="reader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"></div></div>
-      <div class="scanner-controls"><button id="startScan" class="primary">Start camera</button><label>Camera<select id="scanCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label></div>
+      <div id="reader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"><span>QR can be anywhere in this view</span></div></div>
+      <div class="scanner-controls"><button id="startScan" class="primary">Start camera</button><label>Camera<select id="scanCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label><button id="scanFlash" class="secondary flash-button" type="button" aria-pressed="false" hidden>Turn on flashlight</button></div>
       <div id="scanCameraStatus" class="camera-help" hidden></div>
       <div class="qr-image-options"><label class="upload native-camera">Take a QR photo<input id="qrCameraFile" type="file" accept="image/*" capture="environment"></label><label class="upload">Choose QR photo or screenshot<input id="qrFile" type="file" accept="image/*"></label></div>
       <details><summary>Camera unavailable? Paste payload</summary><textarea id="payload" rows="4"></textarea><button id="importText" class="secondary">Import text</button></details>
@@ -806,11 +860,12 @@ async function renderScan() {
     </section>`;
   const video = document.querySelector('#reader video');
   const cameraSelect = document.querySelector('#scanCamera');
-  wireCameraSelect(cameraSelect);
+  const flashButton = document.querySelector('#scanFlash');
+  wireCameraSelect(cameraSelect, flashButton);
   document.querySelector('#startScan').onclick = async () => {
     const status = document.querySelector('#scanCameraStatus');
     try {
-      await startQrCamera(video, result => importPayload(result.data), cameraSelect);
+      await startQrCamera(video, result => importPayload(result.data), cameraSelect, flashButton);
       document.querySelector('#startScan').hidden = true;
       status.hidden = true;
     } catch (error) {
