@@ -28,10 +28,10 @@ assert.match(source, /returnDetailedScanResult: true/);
 assert.match(source, /id="qrCameraFile"[^>]+capture="environment"/);
 assert.match(source, /id="eventQrCameraFile"[^>]+capture="environment"/);
 assert.match(source, /wireQrImageInput\(document\.querySelector\('#qrCameraFile'\), importPayload/);
-assert.match(source, /wireQrImageInput\(document\.querySelector\('#eventQrCameraFile'\), importEventSetupPayload/);
+assert.match(source, /wireQrImageInput\(document\.querySelector\('#eventQrCameraFile'\), importEventOrMatchSetupPayload/);
 assert.match(source, /Camera permission is blocked/);
 assert.match(css, /@media\(max-width:520px\)\{\.scanner-controls,\.qr-image-options\{grid-template-columns:1fr\}/);
 assert.match(css, /filter:brightness\(1\.14\) contrast\(1\.18\)/);
-assert.match(worker, /tiger-scout-v35-wide-qr-scanner/);
+assert.match(worker, /tiger-scout-v36-match-preload/);
 
 console.log('Full-frame QR scanning, light and dark QR detection, flashlight support, awake screen, image fallback, and mobile layout verified.');

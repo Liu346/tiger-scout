@@ -606,6 +606,35 @@ function decodeEventSetupPayload(payload) {
   return config;
 }
 
+function scoutAssignmentPayload(assignment) {
+  return `SCT1:${btoa(unescape(encodeURIComponent(JSON.stringify(assignment))))}`;
+}
+
+function decodeScoutAssignmentPayload(payload) {
+  if (!payload.startsWith('SCT1:')) throw new Error('Not a scout assignment');
+  const assignment = JSON.parse(decodeURIComponent(escape(atob(payload.slice(5)))));
+  const event = String(assignment?.event || '').trim();
+  const match = String(assignment?.match || '').trim();
+  const team = String(assignment?.team || '').trim();
+  const alliance = String(assignment?.alliance || '').toLowerCase();
+  if (!event || !/^\d+$/.test(match) || Number(match) < 1 || !/^\d+$/.test(team) || Number(team) < 1 || !['red','blue'].includes(alliance)) {
+    throw new Error('Invalid scout assignment');
+  }
+  return { v:1, event, match, team, alliance };
+}
+
+function pendingScoutAssignment() {
+  try {
+    const assignment = JSON.parse(localStorage.getItem('tiger-pending-scout-assignment') || 'null');
+    const event = String(assignment?.event || '').trim();
+    const match = String(assignment?.match || '').trim();
+    const team = String(assignment?.team || '').trim();
+    const alliance = String(assignment?.alliance || '').toLowerCase();
+    if (!event || !/^\d+$/.test(match) || Number(match) < 1 || !/^\d+$/.test(team) || Number(team) < 1 || !['red','blue'].includes(alliance)) return null;
+    return { v:1, event, match, team, alliance };
+  } catch { return null; }
+}
+
 function activateEvent(config) {
   localStorage.setItem('tiger-selected-event', config.name);
   localStorage.setItem('tiger-last-scout-event', config.name);
@@ -630,18 +659,124 @@ async function importEventSetupPayload(payload) {
   try {
     const config = saveEventConfig(decodeEventSetupPayload(payload));
     activateEvent(config);
-    if (scanner) { await scanner.stop(); scanner.destroy(); scanner = null; }
+    await stopQrCamera();
     toast(`${config.name} is ready with ${config.teams.length} teams.`);
     setTimeout(() => go('scout'), 650);
   } catch { toast('That is not a valid Tiger Scout event setup.', true); }
+}
+
+async function importScoutAssignmentPayload(payload) {
+  try {
+    const assignment = decodeScoutAssignmentPayload(payload);
+    localStorage.setItem('tiger-saved-events', JSON.stringify([...new Set([...savedEventNames(), assignment.event])].sort()));
+    localStorage.setItem('tiger-selected-event', assignment.event);
+    localStorage.setItem('tiger-last-scout-event', assignment.event);
+    localStorage.setItem('tiger-pending-scout-assignment', JSON.stringify(assignment));
+    draft = {...blank(), scout:draft.scout, ...assignment};
+    await stopQrCamera();
+    toast(`Match ${assignment.match}, Team ${assignment.team} is preloaded.`);
+    setTimeout(() => go('scout'), 500);
+  } catch { toast('That is not a valid Tiger Scout match assignment.', true); }
+}
+
+function importEventOrMatchSetupPayload(payload) {
+  if (payload.startsWith('SCT1:')) return importScoutAssignmentPayload(payload);
+  return importEventSetupPayload(payload);
+}
+
+function drawMatchPreloadQrs(preload, shouldScroll = true) {
+  const panel = document.querySelector('#matchPreloadQrPanel');
+  if (!panel || !preload) return;
+  const assignments = [
+    ...preload.red.map((team, index) => ({ v:1, event:preload.event, match:preload.match, team, alliance:'red', station:`Red ${index + 1}` })),
+    ...preload.blue.map((team, index) => ({ v:1, event:preload.event, match:preload.match, team, alliance:'blue', station:`Blue ${index + 1}` }))
+  ];
+  panel.innerHTML = `
+    <div class="match-preload-output-head"><div><p class="eyebrow">SIX SCOUT ASSIGNMENTS</p><h2>${escapeHtml(preload.event)} · Match ${escapeHtml(preload.match)}</h2><p>Each scout scans the QR for their driver station. Their next scouting form opens with the event, match, team, and alliance filled in.</p></div><strong>6 QR</strong></div>
+    <div class="assignment-qr-grid">${assignments.map((assignment, index) => `
+      <article class="assignment-qr-card ${assignment.alliance}">
+        <div><span>${assignment.station}</span><strong>Team ${escapeHtml(assignment.team)}</strong></div>
+        <div class="qr-wrap"><div id="matchAssignmentQr${index}"></div></div>
+        <small>${escapeHtml(assignment.event)} · Match ${escapeHtml(assignment.match)}</small>
+      </article>`).join('')}</div>`;
+  assignments.forEach((assignment, index) => new QRCode(document.querySelector(`#matchAssignmentQr${index}`), {
+    text: scoutAssignmentPayload(assignment), width: 230, height: 230,
+    colorDark: '#090807', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M
+  }));
+  if (shouldScroll) panel.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 function renderEventCreator() {
   const configs = eventConfigs();
   const selectedName = localStorage.getItem('tiger-selected-event') || configs[0]?.name || '';
   const selected = configs.find(event => event.name === selectedName) || configs[0];
+  const eventView = localStorage.getItem('tiger-event-view') === 'match' ? 'match' : 'setup';
+  const header = `
+    <section class="pagehead event-head"><p class="eyebrow">EVENT OPERATIONS</p><h1>${eventView === 'match' ? 'Preload a match' : 'Create or join an event'}</h1><p>${eventView === 'match' ? 'Create one QR assignment for each robot so all six scouts begin with the correct match information.' : 'Build one event QR, then scan it on every scouting device to preload the same event and team roster.'}</p></section>
+    <nav class="picklist-subtabs event-mode-tabs" aria-label="Event tools"><button data-event-view="setup" class="${eventView === 'setup' ? 'active' : ''}">Event setup</button><button data-event-view="match" class="${eventView === 'match' ? 'active' : ''}">Match preload</button></nav>`;
+
+  const wireEventModeTabs = () => document.querySelectorAll('[data-event-view]').forEach(button => button.onclick = async () => {
+    await stopQrCamera();
+    localStorage.setItem('tiger-event-view', button.dataset.eventView);
+    renderEventCreator();
+  });
+
+  if (eventView === 'match') {
+    let preloadDraft = {};
+    let lastPreload = null;
+    let schedule = [];
+    try { preloadDraft = JSON.parse(localStorage.getItem('tiger-match-preload-draft') || '{}'); } catch {}
+    try { lastPreload = JSON.parse(localStorage.getItem('tiger-match-preload-last') || 'null'); } catch {}
+    try { schedule = JSON.parse(localStorage.getItem('tiger-tba-schedule') || '[]'); } catch {}
+    const eventName = savedEventNames().includes(preloadDraft.event) ? preloadDraft.event : selectedName;
+    const allRosterTeams = [...new Set(eventConfigs().flatMap(event => event.teams || []).filter(team => /^\d+$/.test(String(team))))].sort((a,b)=>Number(a)-Number(b));
+    view.innerHTML = `${header}
+      <form id="matchPreloadForm" class="match-preload-card">
+        <div class="match-preload-heading"><div><p class="eyebrow">MATCH ASSIGNMENTS</p><h2>Six robots, six QR codes</h2><p>Enter the teams in driver-station order. A scout only needs to scan their assigned code.</p></div><button id="fillMatchSchedule" class="secondary" type="button" ${schedule.length ? '' : 'disabled'}>Fill from saved schedule</button></div>
+        <div class="match-preload-basics"><label>Event<select name="event" required>${savedEventNames().map(event => `<option value="${escapeHtml(event)}" ${event === eventName ? 'selected' : ''}>${escapeHtml(event)}</option>`).join('')}</select></label><label>Match #<input name="match" type="number" inputmode="numeric" min="1" step="1" required value="${escapeHtml(preloadDraft.match || '')}"></label></div>
+        <datalist id="matchPreloadTeams">${allRosterTeams.map(team => `<option value="${escapeHtml(team)}"></option>`).join('')}</datalist>
+        <div class="match-assignment-grid">
+          <fieldset class="match-alliance red"><legend>Red alliance</legend><div class="match-team-fields">${[1,2,3].map(index => `<label>Red ${index}<input name="red${index}" type="number" inputmode="numeric" min="1" step="1" list="matchPreloadTeams" required value="${escapeHtml(preloadDraft[`red${index}`] || '')}"></label>`).join('')}</div></fieldset>
+          <fieldset class="match-alliance blue"><legend>Blue alliance</legend><div class="match-team-fields">${[1,2,3].map(index => `<label>Blue ${index}<input name="blue${index}" type="number" inputmode="numeric" min="1" step="1" list="matchPreloadTeams" required value="${escapeHtml(preloadDraft[`blue${index}`] || '')}"></label>`).join('')}</div></fieldset>
+        </div>
+        <button class="primary wide" type="submit">Create 6 scout QR codes</button>
+      </form>
+      <section id="matchPreloadQrPanel" class="match-preload-output" ${lastPreload ? '' : 'hidden'}></section>`;
+    wireEventModeTabs();
+    const form = document.querySelector('#matchPreloadForm');
+    const readForm = () => Object.fromEntries(new FormData(form).entries());
+    form.addEventListener('input', () => localStorage.setItem('tiger-match-preload-draft', JSON.stringify(readForm())));
+    document.querySelector('#fillMatchSchedule').onclick = () => {
+      const matchNumber = Number(form.elements.match.value);
+      const match = schedule.find(item => Number(item.number) === matchNumber);
+      if (!match) return toast('That match is not in the saved TBA schedule.', true);
+      match.red.slice(0,3).forEach((team,index) => { form.elements[`red${index + 1}`].value = team; });
+      match.blue.slice(0,3).forEach((team,index) => { form.elements[`blue${index + 1}`].value = team; });
+      localStorage.setItem('tiger-match-preload-draft', JSON.stringify(readForm()));
+      toast(`Qualification ${matchNumber} teams loaded.`);
+    };
+    form.onsubmit = event => {
+      event.preventDefault();
+      const values = readForm();
+      const match = String(values.match || '').trim();
+      const red = [values.red1, values.red2, values.red3].map(value => String(value || '').trim());
+      const blue = [values.blue1, values.blue2, values.blue3].map(value => String(value || '').trim());
+      const teams = [...red, ...blue];
+      if (!/^\d+$/.test(match) || Number(match) < 1 || teams.some(team => !/^\d+$/.test(team) || Number(team) < 1)) return toast('Enter a valid match number and all six numeric team numbers.', true);
+      if (new Set(teams).size !== 6) return toast('Each robot assignment needs a different team number.', true);
+      const preload = { v:1, event:String(values.event), match, red, blue, createdAt:Date.now() };
+      localStorage.setItem('tiger-match-preload-draft', JSON.stringify(values));
+      localStorage.setItem('tiger-match-preload-last', JSON.stringify(preload));
+      localStorage.setItem('tiger-selected-event', preload.event);
+      drawMatchPreloadQrs(preload);
+      toast(`Six Match ${match} scout assignments are ready.`);
+    };
+    if (lastPreload) drawMatchPreloadQrs(lastPreload, false);
+    return;
+  }
+
   view.innerHTML = `
-    <section class="pagehead event-head"><p class="eyebrow">EVENT SETUP</p><h1>Create or join an event</h1><p>Build one event QR, then scan it on every scouting device to preload the same event and team roster.</p></section>
+    ${header}
     <section class="event-creator-grid">
       <form id="eventCreatorForm" class="event-create-card">
         <p class="eyebrow">CREATE EVENT</p><h2>Event details</h2>
@@ -651,16 +786,17 @@ function renderEventCreator() {
         <button class="primary wide" type="submit">Save event & create QR</button>
       </form>
       <section class="event-join-card">
-        <p class="eyebrow">JOIN EVENT</p><h2>Scan an event setup</h2><p>Use the camera or a screenshot from the event lead. Scanning immediately selects the event and preloads its team list.</p>
+        <p class="eyebrow">JOIN OR PRELOAD</p><h2>Scan a setup QR</h2><p>Scan an event setup or one of the six match assignments. Match assignments open the scouting form with the correct event, match, team, and alliance.</p>
         <div id="eventReader"><video playsinline webkit-playsinline muted autoplay></video><div class="scan-frame"><span>QR can be anywhere in this view</span></div></div>
         <div class="scanner-controls"><button id="startEventScan" class="primary">Start camera</button><label>Camera<select id="eventCamera"><option value="environment">Back camera</option><option value="user">Front camera</option></select></label><button id="eventFlash" class="secondary flash-button" type="button" aria-pressed="false" hidden>Turn on flashlight</button></div>
         <div id="eventCameraStatus" class="camera-help" hidden></div>
         <div class="qr-image-options"><label class="upload native-camera">Take a QR photo<input id="eventQrCameraFile" type="file" accept="image/*" capture="environment"></label><label class="upload">Choose QR photo or screenshot<input id="eventQrFile" type="file" accept="image/*"></label></div>
-        <details><summary>Camera unavailable? Paste event payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import event</button></details>
+        <details><summary>Camera unavailable? Paste setup payload</summary><textarea id="eventPayload" rows="4"></textarea><button id="importEventText" class="secondary">Import setup</button></details>
       </section>
     </section>
     <section id="eventSetupQrPanel" class="event-qr-panel" hidden></section>
     <section class="saved-event-card"><div><p class="eyebrow">SAVED EVENTS</p><h2>${configs.length} event setup${configs.length === 1 ? '' : 's'}</h2></div><div class="saved-event-list">${configs.map(config => `<article><div><strong>${escapeHtml(config.name)}</strong><span>${config.teams.length} teams${config.location ? ` · ${escapeHtml(config.location)}` : ''}</span></div><div><button class="secondary" data-use-event="${escapeHtml(config.id)}">Use event</button><button class="secondary" data-share-event="${escapeHtml(config.id)}">Show QR</button></div></article>`).join('')}</div></section>`;
+  wireEventModeTabs();
   document.querySelector('#eventCreatorForm').onsubmit = event => {
     event.preventDefault();
     const fd = new FormData(event.target);
@@ -683,7 +819,7 @@ function renderEventCreator() {
   document.querySelector('#startEventScan').onclick = async () => {
     const status = document.querySelector('#eventCameraStatus');
     try {
-      await startQrCamera(video, result => importEventSetupPayload(result.data), cameraSelect, flashButton);
+      await startQrCamera(video, result => importEventOrMatchSetupPayload(result.data), cameraSelect, flashButton);
       document.querySelector('#startEventScan').hidden = true;
       status.hidden = true;
     } catch (error) {
@@ -692,9 +828,9 @@ function renderEventCreator() {
       toast('Live camera unavailable — use a QR photo below.', true);
     }
   };
-  wireQrImageInput(document.querySelector('#eventQrCameraFile'), importEventSetupPayload, 'No event QR code was found in that photo.');
-  wireQrImageInput(document.querySelector('#eventQrFile'), importEventSetupPayload, 'No event QR code was found in that image.');
-  document.querySelector('#importEventText').onclick = () => importEventSetupPayload(document.querySelector('#eventPayload').value.trim());
+  wireQrImageInput(document.querySelector('#eventQrCameraFile'), importEventOrMatchSetupPayload, 'No Tiger Scout setup QR code was found in that photo.');
+  wireQrImageInput(document.querySelector('#eventQrFile'), importEventOrMatchSetupPayload, 'No Tiger Scout setup QR code was found in that image.');
+  document.querySelector('#importEventText').onclick = () => importEventOrMatchSetupPayload(document.querySelector('#eventPayload').value.trim());
   document.querySelectorAll('[data-use-event]').forEach(button => button.onclick = () => {
     const config = configs.find(event => event.id === button.dataset.useEvent);
     if (!config) return;
@@ -707,6 +843,10 @@ function renderEventCreator() {
 }
 
 function renderScout() {
+  const pendingAssignment = pendingScoutAssignment();
+  if (pendingAssignment && ['event','match','team','alliance'].some(key => String(draft[key]) !== String(pendingAssignment[key]))) {
+    draft = {...blank(), scout:draft.scout, ...pendingAssignment};
+  }
   const selectedEvent = localStorage.getItem('tiger-selected-event') || 'all';
   const lastScoutEvent = localStorage.getItem('tiger-last-scout-event') || '';
   if (selectedEvent !== 'all') draft.event = selectedEvent;
@@ -718,6 +858,7 @@ function renderScout() {
   const roster = rosters[draft.event] || eventConfigs().find(event => event.name === draft.event)?.teams || [];
   view.innerHTML = `
     <section class="pagehead"><p class="eyebrow">NEW RECORD</p><h1>Match scouting</h1><p>Complete the card, save it locally, then show its QR to your collector.</p></section>
+    ${pendingAssignment ? `<section class="preloaded-assignment-banner ${pendingAssignment.alliance}"><div><p class="eyebrow">QR ASSIGNMENT LOADED</p><strong>${escapeHtml(pendingAssignment.alliance.toUpperCase())} · Match ${escapeHtml(pendingAssignment.match)} · Team ${escapeHtml(pendingAssignment.team)}</strong></div><p>Event, match, team, and alliance are ready. Add your scout name and complete the scouting card.</p></section>` : ''}
     <form id="scoutForm" class="form-card">
       <fieldset><legend>Match setup</legend>
         <div class="grid">
@@ -762,9 +903,11 @@ function renderScout() {
   });
   document.querySelector('#scoutForm').addEventListener('input', event => {
     const input = event.target;
+    if (['event','match','team','alliance'].includes(input.name)) localStorage.removeItem('tiger-pending-scout-assignment');
     if (input.name && !/^(auto|tele)Fuel/.test(input.name)) draft[input.name] = input.type === 'checkbox' ? input.checked : input.value;
   });
   document.querySelector('[name="event"]').addEventListener('change', event => {
+    localStorage.removeItem('tiger-pending-scout-assignment');
     localStorage.setItem('tiger-selected-event', event.target.value);
     localStorage.setItem('tiger-last-scout-event', event.target.value);
     draft.event = event.target.value;
@@ -816,6 +959,7 @@ async function saveScout(e) {
     }
   }
   await (await dbPromise).put('records', draft);
+  localStorage.removeItem('tiger-pending-scout-assignment');
   const saved = {...draft};
   draft = {...blank(), event: draft.event, scout: draft.scout};
   await renderQr(saved);
@@ -885,6 +1029,7 @@ async function importPayload(payload) {
     if (payload.startsWith('TSB1:') || payload.startsWith('TSB2:')) return importBackupChunk(payload);
     if (payload.startsWith('TMP2J:') || payload.startsWith('TMP2G:')) return importMatchPrepPacketChunk(payload);
     if (payload.startsWith('TMP1:')) return importMatchPrepPayload(payload);
+    if (payload.startsWith('SCT1:')) return importScoutAssignmentPayload(payload);
     if (payload.startsWith('EVT1:')) return importEventSetupPayload(payload);
     if (!payload.startsWith('PL1:')) throw new Error();
     const record = JSON.parse(decodeURIComponent(escape(atob(payload.slice(4)))));

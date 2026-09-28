@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v35-wide-qr-scanner';
+const CACHE = 'tiger-scout-v36-match-preload';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png',
   '/src/main.js', '/src/style.css',

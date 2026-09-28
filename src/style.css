@@ -526,3 +526,31 @@ tbody tr:hover{background:#25292c}
 .qr-image-options .upload{display:grid;place-items:center;text-align:center;min-height:50px}
 .qr-image-options .native-camera{background:var(--mint);border-color:var(--mint);color:#17110d}
 @media(max-width:520px){.scanner-controls,.qr-image-options{grid-template-columns:1fr}.scan-frame span{font-size:11px}}
+
+/* Event match preload and six scout assignment QR codes */
+.event-mode-tabs{grid-template-columns:repeat(2,minmax(0,1fr));max-width:480px}
+.match-preload-card,.match-preload-output{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:24px}
+.match-preload-heading,.match-preload-output-head{display:flex;align-items:start;justify-content:space-between;gap:22px}
+.match-preload-heading h2,.match-preload-output-head h2{font:600 28px 'Space Grotesk';margin:5px 0}
+.match-preload-heading p:not(.eyebrow),.match-preload-output-head p:not(.eyebrow){color:var(--muted);line-height:1.5;margin-bottom:0}
+.match-preload-basics{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,190px);gap:12px;margin:22px 0}
+.match-assignment-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.match-alliance{border:1px solid var(--line);border-top-width:4px;border-radius:9px;padding:18px;background:var(--panel)}
+.match-alliance.red{border-top-color:#e56f65}.match-alliance.blue{border-top-color:#60a9e8}
+.match-alliance legend{font:600 21px 'Space Grotesk';padding:0 7px}.match-alliance.red legend{color:#f19a91}.match-alliance.blue legend{color:#8ec8fa}
+.match-team-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.match-preload-card>.wide{margin:18px 0 0}
+.match-preload-output{margin-top:18px}.match-preload-output[hidden]{display:none}
+.match-preload-output-head>strong{display:grid;place-items:center;min-width:62px;height:62px;border-radius:50%;background:#35241a;color:#ffd0a8;border:1px solid #9b6338;font:700 18px 'Space Grotesk'}
+.assignment-qr-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+.assignment-qr-card{min-width:0;padding:16px;border:1px solid var(--line);border-top-width:5px;border-radius:9px;background:var(--panel);text-align:center}
+.assignment-qr-card.red{border-top-color:#e56f65}.assignment-qr-card.blue{border-top-color:#60a9e8}
+.assignment-qr-card>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left}
+.assignment-qr-card span{color:var(--muted);font-size:12px;font-weight:800;text-transform:uppercase}.assignment-qr-card strong{font:600 19px 'Space Grotesk'}
+.assignment-qr-card .qr-wrap{width:min(100%,250px);margin:14px auto;padding:10px}.assignment-qr-card canvas,.assignment-qr-card img{display:block;max-width:100%;height:auto!important}
+.assignment-qr-card small{color:var(--muted)}
+.preloaded-assignment-banner{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:16px;padding:18px 20px;border:1px solid var(--line);border-left:5px solid;border-radius:9px;background:var(--panel)}
+.preloaded-assignment-banner.red{border-left-color:#e56f65}.preloaded-assignment-banner.blue{border-left-color:#60a9e8}
+.preloaded-assignment-banner strong{font:600 22px 'Space Grotesk'}.preloaded-assignment-banner p{margin:0}.preloaded-assignment-banner>p{max-width:430px;color:var(--muted);line-height:1.45}
+@media(max-width:900px){.assignment-qr-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.event-mode-tabs{display:grid;grid-template-columns:1fr 1fr;max-width:none}.event-mode-tabs button{min-width:0}.match-preload-card,.match-preload-output{padding:17px}.match-preload-heading,.match-preload-output-head,.preloaded-assignment-banner{align-items:stretch;flex-direction:column}.match-preload-heading .secondary{width:100%}.match-preload-basics,.match-assignment-grid,.assignment-qr-grid{grid-template-columns:1fr}.match-preload-output-head>strong{align-self:start;min-width:52px;height:52px}.assignment-qr-card{padding:14px}.assignment-qr-card .qr-wrap{width:min(100%,270px)}.preloaded-assignment-banner{gap:10px}.preloaded-assignment-banner strong{font-size:20px}}
