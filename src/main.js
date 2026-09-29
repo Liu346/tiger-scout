@@ -1664,6 +1664,9 @@ function validateMatchPrepPacket(packet) {
   return { ...packet, prep };
 }
 
+const MATCH_PREP_QR_CHUNK_SIZE = 450;
+const MATCH_PREP_QR_SIZE = 360;
+
 async function showMatchPrepQr(prep) {
   const panel = document.querySelector('#matchPrepQrPanel');
   if (!panel) return;
@@ -1688,17 +1691,17 @@ async function showMatchPrepQr(prep) {
     }
     let binary = '';
     for (let offset = 0; offset < packetBytes.length; offset += 0x8000) binary += String.fromCharCode(...packetBytes.subarray(offset, offset + 0x8000));
-    const parts = (btoa(binary).match(/.{1,1500}/g) || ['']);
+    const parts = (btoa(binary).match(new RegExp(`.{1,${MATCH_PREP_QR_CHUNK_SIZE}}`, 'g')) || ['']);
     const session = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     let index = 0;
     const draw = () => {
       panel.innerHTML = `
-        <div class="matchprep-qr-copy"><p class="eyebrow">MATCH DATA PACKET</p><h2>${escapeHtml(packet.prep.title || 'Saved matchup')}</h2><p>Scan all ${parts.length} code${parts.length === 1 ? '' : 's'} in Tiger Scout's Scan tab. This sends ${summary.recordCount} scouting records and ${summary.scheduleCount} schedule entries for the ${summary.teamCount} teams in this match.</p><div class="packet-progress"><b>Code ${index + 1} of ${parts.length}</b><span>${summary.teamCount} teams · ${summary.recordCount} records</span></div></div>
+        <div class="matchprep-qr-copy"><p class="eyebrow">MATCH DATA PACKET</p><h2>${escapeHtml(packet.prep.title || 'Saved matchup')}</h2><p>Scan all ${parts.length} code${parts.length === 1 ? '' : 's'} in Tiger Scout's Scan tab. Each code is camera-optimized and sends part of the matchup, event details, and scouting data for these six teams.</p><div class="packet-progress"><b>Code ${index + 1} of ${parts.length}</b><span>${summary.teamCount} teams · ${summary.recordCount} records</span></div></div>
         <div><div class="qr-wrap"><div data-matchprep-qr></div></div><div class="backup-qr-actions"><button data-packet-prev class="secondary" ${index === 0 ? 'disabled' : ''}>Previous</button><button data-packet-next class="primary">${index === parts.length - 1 ? 'Start over' : 'Next code'}</button></div></div>`;
       new QRCode(panel.querySelector('[data-matchprep-qr]'), {
         text: `${version}:${session}:${index}:${parts.length}:${parts[index]}`,
-        width: 300, height: 300, colorDark: '#090807', colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.L
+        width: MATCH_PREP_QR_SIZE, height: MATCH_PREP_QR_SIZE, colorDark: '#000000', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
       });
       panel.querySelector('[data-packet-prev]').onclick = () => { index--; draw(); };
       panel.querySelector('[data-packet-next]').onclick = () => { index = index === parts.length - 1 ? 0 : index + 1; draw(); };

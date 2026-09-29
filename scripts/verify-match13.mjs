@@ -13,7 +13,7 @@ assert.match(source, /tiger-match13-teams/);
 assert.match(source, /teamAnalytics: relevantAnalytics/);
 assert.match(workerSource, /https:\/\/actions\.match13\.com/);
 assert.match(workerSource, /Bearer \$\{env\.MATCH13_API_KEY\}/);
-assert.match(serviceWorker, /tiger-scout-v37-worlds-landing/);
+assert.match(serviceWorker, /tiger-scout-v38-readable-matchprep-qr/);
 assert.match(source, /team-match13-card/);
 assert.match(source, /AUTO XP/);
 assert.match(source, /TELEOP XP/);
