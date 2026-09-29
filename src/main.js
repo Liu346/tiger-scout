@@ -326,6 +326,7 @@ async function go(page) {
     page = 'settings';
   }
   setActive(page);
+  document.body.classList.toggle('landing-page', page === 'home');
   if (page === 'scout') renderScout();
   else if (page === 'events') renderEventCreator();
   else if (page === 'scan') await renderScan();
@@ -342,6 +343,11 @@ async function go(page) {
 }
 
 async function renderHome() {
+  view.innerHTML = `
+    <section class="home-landing" aria-label="9072 Scouting App">
+      <h1><span>9072</span> Scouting App</h1>
+    </section>`;
+  return;
   const allRecords = await records();
   let savedEvents = [];
   try { savedEvents = JSON.parse(localStorage.getItem('tiger-saved-events') || '[]'); } catch {}

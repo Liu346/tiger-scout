@@ -9,7 +9,7 @@ assert.ok(output.startsWith(`${root}/`) || output.startsWith(`${root}\\`), 'Outp
 const vendor = ['qrcode.min.js', 'qr-scanner.umd.min.js', 'qr-scanner-worker.min.js', 'chart.umd.min.js'];
 const canonical = [
   'index.html', 'sw.js', 'src/main.js', 'src/style.css',
-  'public/manifest.webmanifest', 'public/icon.svg', 'public/team-9072-logo.png', 'public/og.png',
+  'public/manifest.webmanifest', 'public/icon.svg', 'public/team-9072-logo.png', 'public/frc-world-championship.webp', 'public/og.png',
   ...vendor.map(name => `public/vendor/${name}`)
 ];
 // Keep old installed apps working while they fetch the current index and worker.
@@ -17,6 +17,7 @@ const aliases = [
   ['src/main.js', 'main.js'], ['src/style.css', 'style.css'],
   ['public/manifest.webmanifest', 'manifest.webmanifest'],
   ['public/icon.svg', 'icon.svg'], ['public/team-9072-logo.png', 'team-9072-logo.png'],
+  ['public/frc-world-championship.webp', 'frc-world-championship.webp'],
   ...vendor.map(name => [`public/vendor/${name}`, name])
 ];
 const files = [...canonical.map(name => [name, name]), ...aliases];

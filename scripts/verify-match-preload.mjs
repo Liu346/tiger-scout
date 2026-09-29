@@ -27,6 +27,6 @@ assert.match(css, /\.assignment-qr-grid\{display:grid;grid-template-columns:repe
 assert.match(css, /@media\(max-width:900px\)\{\.assignment-qr-grid\{grid-template-columns:repeat\(2/);
 assert.match(css, /@media\(max-width:700px\)[\s\S]*\.assignment-qr-grid\{grid-template-columns:1fr/);
 assert.match(css, /\.preloaded-assignment-banner/);
-assert.match(worker, /tiger-scout-v36-match-preload/);
+assert.match(worker, /tiger-scout-v37-worlds-landing/);
 
 console.log('Six-code match preload, assignment persistence, receiving flows, and responsive layout verified.');

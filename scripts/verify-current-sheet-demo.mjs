@@ -19,6 +19,6 @@ assert.match(generator, /startsWith\('demo-2026-'\)/);
 assert.doesNotMatch(generator, /TigerBots Invitational|v: 2/);
 assert.match(source, /Load competition test data/);
 assert.doesNotMatch(source, /Load 360 test records/);
-assert.match(serviceWorker, /tiger-scout-v36-match-preload/);
+assert.match(serviceWorker, /tiger-scout-v37-worlds-landing/);
 
 console.log('Competition test data matches the current scouting sheet fields and CRI roster.');
