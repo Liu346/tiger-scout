@@ -1033,6 +1033,7 @@ async function renderScan() {
 async function importPayload(payload) {
   try {
     if (payload.startsWith('TSB1:') || payload.startsWith('TSB2:')) return importBackupChunk(payload);
+    if (payload.startsWith('TMP3:')) return importCompactMatchPrepPayload(payload);
     if (payload.startsWith('TMP2J:') || payload.startsWith('TMP2G:')) return importMatchPrepPacketChunk(payload);
     if (payload.startsWith('TMP1:')) return importMatchPrepPayload(payload);
     if (payload.startsWith('SCT1:')) return importScoutAssignmentPayload(payload);
@@ -1612,6 +1613,60 @@ function matchPrepPayload(prep) {
   return `TMP1:${btoa(unescape(encodeURIComponent(JSON.stringify(prep))))}`;
 }
 
+function compactMatchPrepPayload(prep) {
+  const teams = [...new Set([...(prep.ours || []), ...(prep.opponents || [])].map(String).filter(Boolean))].slice(0, 6);
+  const strategy = teams.map(team => {
+    const start = prep.autoStarts?.[team];
+    const note = String(prep.teamNotes?.[team] || '').trim().slice(0, 80);
+    return [team, start ? Math.round(Number(start.x) || 0) : null, start ? Math.round(Number(start.y) || 0) : null, note];
+  });
+  const compact = {
+    v: 3,
+    i: prep.id || `prep-${makeId()}`,
+    k: prep.kind,
+    t: prep.title,
+    e: prep.event,
+    m: prep.matchNumber || null,
+    a: (prep.ours || []).slice(0, 3).map(String),
+    b: (prep.opponents || []).slice(0, 3).map(String),
+    p: [prep.ourScore, prep.ourMin, prep.ourMax, prep.opponentScore, prep.opponentMin, prep.opponentMax, prep.winChance].map(value => Math.round((Number(value) || 0) * 10) / 10),
+    s: strategy
+  };
+  return `TMP3:${btoa(unescape(encodeURIComponent(JSON.stringify(compact))))}`;
+}
+
+function decodeCompactMatchPrepPayload(payload) {
+  if (!payload.startsWith('TMP3:')) throw new Error('Not a compact match prep');
+  const compact = JSON.parse(decodeURIComponent(escape(atob(payload.slice(5)))));
+  if (Number(compact?.v) !== 3 || !['schedule','manual'].includes(compact.k) || !Array.isArray(compact.a) || !Array.isArray(compact.b) || compact.a.length !== 3 || compact.b.length !== 3 || !Array.isArray(compact.p) || compact.p.length !== 7 || !Array.isArray(compact.s)) throw new Error('Invalid compact match prep');
+  const ours = compact.a.map(String);
+  const opponents = compact.b.map(String);
+  const teams = new Set([...ours, ...opponents]);
+  if (teams.size !== 6 || [...teams].some(team => !team)) throw new Error('Invalid compact teams');
+  const autoStarts = {};
+  const teamNotes = {};
+  for (const entry of compact.s) {
+    if (!Array.isArray(entry) || !teams.has(String(entry[0]))) continue;
+    const team = String(entry[0]);
+    const hasStart = entry[1] !== null && entry[1] !== undefined && entry[2] !== null && entry[2] !== undefined;
+    const x = Number(entry[1]);
+    const y = Number(entry[2]);
+    if (hasStart && Number.isFinite(x) && Number.isFinite(y)) autoStarts[team] = { x:Math.min(100,Math.max(0,x)), y:Math.min(100,Math.max(0,y)) };
+    const note = String(entry[3] || '').trim().slice(0, 80);
+    if (note) teamNotes[team] = note;
+  }
+  const [ourScore, ourMin, ourMax, opponentScore, opponentMin, opponentMax, winChanceRaw] = compact.p.map(value => Number(value) || 0);
+  const winChance = Math.min(100, Math.max(0, winChanceRaw));
+  return {
+    id: String(compact.i || `prep-${makeId()}`), v:3, kind:compact.k,
+    title:String(compact.t || 'Saved matchup'), event:String(compact.e || 'Unspecified event'),
+    matchNumber:compact.m || null, ours, opponents,
+    ourScore, ourMin, ourMax, opponentScore, opponentMin, opponentMax, winChance,
+    outcome:winChance >= 65 ? 'Likely win' : winChance <= 35 ? 'Likely loss' : 'Toss-up',
+    autoStarts, teamNotes, savedAt:Date.now(), packetSummary:{ teamCount:6, compact:true }
+  };
+}
+
 function decodeMatchPrepPayload(payload) {
   if (!payload.startsWith('TMP1:')) throw new Error('Not a match prep');
   const prep = JSON.parse(decodeURIComponent(escape(atob(payload.slice(5)))));
@@ -1664,49 +1719,21 @@ function validateMatchPrepPacket(packet) {
   return { ...packet, prep };
 }
 
-const MATCH_PREP_QR_CHUNK_SIZE = 450;
-const MATCH_PREP_QR_SIZE = 360;
-
 async function showMatchPrepQr(prep) {
   const panel = document.querySelector('#matchPrepQrPanel');
   if (!panel) return;
   panel.hidden = false;
-  panel.innerHTML = '<div class="matchprep-qr-copy"><p class="eyebrow">BUILDING PACKET</p><h2>Collecting the six teams’ data…</h2><p>Scouting records and competition details are being compressed for transfer.</p></div>';
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   try {
-    const packet = await buildMatchPrepPacket(prep);
-    const summary = {
-      teamCount: packet.competition.teams.length,
-      recordCount: packet.records.length,
-      scheduleCount: packet.competition.schedule.length
-    };
-    packet.prep = saveMatchPrepSnapshot({ ...prep, packetSummary: summary });
-    const jsonBytes = new TextEncoder().encode(JSON.stringify(packet));
-    let version = 'TMP2J';
-    let packetBytes = jsonBytes;
-    if ('CompressionStream' in window) {
-      const stream = new Blob([jsonBytes]).stream().pipeThrough(new CompressionStream('gzip'));
-      packetBytes = new Uint8Array(await new Response(stream).arrayBuffer());
-      version = 'TMP2G';
-    }
-    let binary = '';
-    for (let offset = 0; offset < packetBytes.length; offset += 0x8000) binary += String.fromCharCode(...packetBytes.subarray(offset, offset + 0x8000));
-    const parts = (btoa(binary).match(new RegExp(`.{1,${MATCH_PREP_QR_CHUNK_SIZE}}`, 'g')) || ['']);
-    const session = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-    let index = 0;
-    const draw = () => {
-      panel.innerHTML = `
-        <div class="matchprep-qr-copy"><p class="eyebrow">MATCH DATA PACKET</p><h2>${escapeHtml(packet.prep.title || 'Saved matchup')}</h2><p>Scan all ${parts.length} code${parts.length === 1 ? '' : 's'} in Tiger Scout's Scan tab. Each code is camera-optimized and sends part of the matchup, event details, and scouting data for these six teams.</p><div class="packet-progress"><b>Code ${index + 1} of ${parts.length}</b><span>${summary.teamCount} teams · ${summary.recordCount} records</span></div></div>
-        <div><div class="qr-wrap"><div data-matchprep-qr></div></div><div class="backup-qr-actions"><button data-packet-prev class="secondary" ${index === 0 ? 'disabled' : ''}>Previous</button><button data-packet-next class="primary">${index === parts.length - 1 ? 'Start over' : 'Next code'}</button></div></div>`;
-      new QRCode(panel.querySelector('[data-matchprep-qr]'), {
-        text: `${version}:${session}:${index}:${parts.length}:${parts[index]}`,
-        width: MATCH_PREP_QR_SIZE, height: MATCH_PREP_QR_SIZE, colorDark: '#000000', colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M
-      });
-      panel.querySelector('[data-packet-prev]').onclick = () => { index--; draw(); };
-      panel.querySelector('[data-packet-next]').onclick = () => { index = index === parts.length - 1 ? 0 : index + 1; draw(); };
-    };
-    draw();
+    const saved = saveMatchPrepSnapshot({ ...prep, packetSummary:{ teamCount:6, compact:true } });
+    const payload = compactMatchPrepPayload(saved);
+    panel.innerHTML = `
+      <div class="matchprep-qr-copy"><p class="eyebrow">COMPACT MATCH PREP</p><h2>${escapeHtml(saved.title || 'Saved matchup')}</h2><p>Scan this single code in Tiger Scout's Scan tab. It contains only alliance score projections and ranges, win probability, autonomous starting positions, and team notes.</p><div class="packet-progress"><b>1 compact QR</b><span>${payload.length} characters · 6 teams</span></div></div>
+      <div><div class="qr-wrap"><div data-matchprep-qr></div></div></div>`;
+    new QRCode(panel.querySelector('[data-matchprep-qr]'), {
+      text: payload, width:420, height:420,
+      colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M
+    });
+    panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
   } catch {
     panel.innerHTML = '<div class="matchprep-qr-copy"><p class="eyebrow">PACKET ERROR</p><h2>Could not build this handoff</h2><p>Return to the matchup and try saving it again.</p></div>';
     toast('Match Prep packet could not be created.', true);
@@ -1720,6 +1747,15 @@ async function importMatchPrepPayload(payload) {
     toast(`${prep.title || 'Match prep'} saved to the catalog.`);
     if (appMode() === 'matchprep' || appMode() === 'command') setTimeout(() => go('matchprep'), 500);
   } catch { toast('That is not a valid Tiger Scout match prep.', true); }
+}
+
+async function importCompactMatchPrepPayload(payload) {
+  try {
+    const prep = saveMatchPrepSnapshot(decodeCompactMatchPrepPayload(payload));
+    localStorage.setItem('tiger-matchprep-view', 'catalog');
+    toast(`${prep.title || 'Match prep'} saved with strategy notes.`);
+    if (appMode() === 'matchprep' || appMode() === 'command') setTimeout(() => go('matchprep'), 500);
+  } catch { toast('That compact Match Prep QR is invalid.', true); }
 }
 
 async function importMatchPrepPacketChunk(payload) {
@@ -1778,6 +1814,125 @@ async function importMatchPrepPacketChunk(payload) {
   }
 }
 
+function matchPrepStrategyKey(snapshot) {
+  if (snapshot?.id) return snapshot.id;
+  const teams = [...(snapshot?.ours || []), ...(snapshot?.opponents || [])].map(String).join('-');
+  return `${snapshot?.kind || 'manual'}|${snapshot?.event || ''}|${teams}`;
+}
+
+function loadMatchPrepStrategy(snapshot) {
+  const teams = [...(snapshot?.ours || []), ...(snapshot?.opponents || [])].map(String).filter(Boolean);
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('tiger-matchprep-strategies') || '{}')[matchPrepStrategyKey(snapshot)] || {}; } catch {}
+  const autoStarts = { ...(snapshot?.autoStarts || {}), ...(saved.autoStarts || {}) };
+  const teamNotes = { ...(snapshot?.teamNotes || {}), ...(saved.teamNotes || {}) };
+  const selectedTeam = teams.includes(String(saved.selectedTeam)) ? String(saved.selectedTeam) : teams[0] || '';
+  return { selectedTeam, autoStarts, teamNotes };
+}
+
+function saveMatchPrepStrategy(snapshot, strategy) {
+  let strategies = {};
+  try { strategies = JSON.parse(localStorage.getItem('tiger-matchprep-strategies') || '{}'); } catch {}
+  strategies[matchPrepStrategyKey(snapshot)] = strategy;
+  localStorage.setItem('tiger-matchprep-strategies', JSON.stringify(strategies));
+}
+
+function attachMatchPrepStrategy(snapshot) {
+  if (!snapshot) return snapshot;
+  const strategy = loadMatchPrepStrategy(snapshot);
+  return { ...snapshot, autoStarts:strategy.autoStarts, teamNotes:strategy.teamNotes };
+}
+
+function matchPrepStrategyMarkup(snapshot) {
+  if (!snapshot || ![...snapshot.ours, ...snapshot.opponents].every(Boolean)) return '';
+  const strategy = loadMatchPrepStrategy(snapshot);
+  const teams = [...snapshot.ours, ...snapshot.opponents].map(String);
+  return `<section class="matchprep-strategy" data-strategy-key="${escapeHtml(matchPrepStrategyKey(snapshot))}">
+    <div class="matchprep-strategy-head"><div><p class="eyebrow">AUTO PLAN & TEAM NOTES</p><h2>Place each robot on the field</h2><p>Select a team, then tap its autonomous starting position. Notes and positions are included in the compact QR.</p></div><strong>${Object.keys(strategy.autoStarts).filter(team => teams.includes(team)).length}/6 placed</strong></div>
+    <div class="matchprep-strategy-layout">
+      <div>
+        <div class="auto-team-picker" aria-label="Select a team to position">${teams.map((team,index) => `<button type="button" class="${team === strategy.selectedTeam ? 'active' : ''} ${index < 3 ? 'ours' : 'opponent'}" data-strategy-team="${escapeHtml(team)}">Team ${escapeHtml(team)}</button>`).join('')}</div>
+        <div id="autoStartField" class="auto-start-field" role="application" aria-label="Autonomous starting position field map" tabindex="0">
+          <span class="field-end ours">YOUR END</span><span class="field-midline"></span><span class="field-end opponent">OPPONENT END</span>
+          <i class="field-lane lane-one"></i><i class="field-lane lane-two"></i>
+          ${teams.map((team,index) => {
+            const start = strategy.autoStarts[team];
+            return start ? `<button type="button" class="auto-start-marker ${index < 3 ? 'ours' : 'opponent'}" data-start-team="${escapeHtml(team)}" style="left:${Number(start.x)}%;top:${Number(start.y)}%" aria-label="Team ${escapeHtml(team)} starting position">${escapeHtml(team)}</button>` : '';
+          }).join('')}
+        </div>
+        <p class="field-help">Selected: <b id="selectedStrategyTeam">Team ${escapeHtml(strategy.selectedTeam)}</b> · Tap anywhere on the field to place it.</p>
+      </div>
+      <div class="matchprep-team-notes">${teams.map((team,index) => `<label class="${index < 3 ? 'ours' : 'opponent'}">Team ${escapeHtml(team)}<textarea rows="2" maxlength="80" data-strategy-note="${escapeHtml(team)}" placeholder="Auto role, defense, priorities…">${escapeHtml(strategy.teamNotes[team] || '')}</textarea></label>`).join('')}</div>
+    </div>
+  </section>`;
+}
+
+function matchPrepCatalogStrategyMarkup(prep) {
+  const teams = [...(prep?.ours || []), ...(prep?.opponents || [])].map(String);
+  const starts = prep?.autoStarts || {};
+  const notes = prep?.teamNotes || {};
+  const placed = teams.filter(team => starts[team]);
+  const noted = teams.filter(team => String(notes[team] || '').trim());
+  if (!placed.length && !noted.length) return '';
+  return `<details class="catalog-strategy"><summary>Auto plan & notes · ${placed.length}/6 placed · ${noted.length} notes</summary>
+    ${placed.length ? `<div class="catalog-mini-field">${placed.map(team => {
+      const index = teams.indexOf(team);
+      return `<span class="${index < 3 ? 'ours' : 'opponent'}" style="left:${Number(starts[team].x)}%;top:${Number(starts[team].y)}%">${escapeHtml(team)}</span>`;
+    }).join('')}</div>` : ''}
+    ${noted.length ? `<div class="catalog-team-notes">${noted.map(team => `<p><b>Team ${escapeHtml(team)}</b>${escapeHtml(notes[team])}</p>`).join('')}</div>` : ''}
+  </details>`;
+}
+
+function wireMatchPrepStrategy(snapshot) {
+  const field = document.querySelector('#autoStartField');
+  if (!field || !snapshot) return;
+  const teams = [...snapshot.ours, ...snapshot.opponents].map(String);
+  const strategy = loadMatchPrepStrategy(snapshot);
+  const selectTeam = team => {
+    if (!teams.includes(String(team))) return;
+    strategy.selectedTeam = String(team);
+    saveMatchPrepStrategy(snapshot, strategy);
+    document.querySelectorAll('[data-strategy-team]').forEach(button => button.classList.toggle('active', button.dataset.strategyTeam === strategy.selectedTeam));
+    const selected = document.querySelector('#selectedStrategyTeam');
+    if (selected) selected.textContent = `Team ${strategy.selectedTeam}`;
+  };
+  document.querySelectorAll('[data-strategy-team]').forEach(button => button.onclick = () => selectTeam(button.dataset.strategyTeam));
+  field.onclick = event => {
+    const marker = event.target.closest('[data-start-team]');
+    if (marker) return selectTeam(marker.dataset.startTeam);
+    const rect = field.getBoundingClientRect();
+    const x = Math.round(Math.min(96, Math.max(4, (event.clientX - rect.left) / rect.width * 100)));
+    const y = Math.round(Math.min(92, Math.max(8, (event.clientY - rect.top) / rect.height * 100)));
+    strategy.autoStarts[strategy.selectedTeam] = { x, y };
+    saveMatchPrepStrategy(snapshot, strategy);
+    let teamMarker = [...field.querySelectorAll('[data-start-team]')].find(item => item.dataset.startTeam === strategy.selectedTeam);
+    if (!teamMarker) {
+      teamMarker = document.createElement('button');
+      teamMarker.type = 'button';
+      teamMarker.dataset.startTeam = strategy.selectedTeam;
+      teamMarker.className = `auto-start-marker ${teams.indexOf(strategy.selectedTeam) < 3 ? 'ours' : 'opponent'}`;
+      teamMarker.textContent = strategy.selectedTeam;
+      field.append(teamMarker);
+    }
+    teamMarker.style.left = `${x}%`;
+    teamMarker.style.top = `${y}%`;
+    teamMarker.setAttribute('aria-label', `Team ${strategy.selectedTeam} starting position`);
+    const placed = Object.keys(strategy.autoStarts).filter(team => teams.includes(team)).length;
+    const count = document.querySelector('.matchprep-strategy-head>strong');
+    if (count) count.textContent = `${placed}/6 placed`;
+  };
+  field.onkeydown = event => {
+    if (!['Enter',' '].includes(event.key)) return;
+    event.preventDefault();
+    const rect = field.getBoundingClientRect();
+    field.dispatchEvent(new MouseEvent('click', { bubbles:true, clientX:rect.left + rect.width / 2, clientY:rect.top + rect.height / 2 }));
+  };
+  document.querySelectorAll('[data-strategy-note]').forEach(input => input.oninput = () => {
+    strategy.teamNotes[input.dataset.strategyNote] = input.value.slice(0, 80);
+    saveMatchPrepStrategy(snapshot, strategy);
+  });
+}
+
 async function renderMatchPrep() {
   const allRecords = await records();
   const selectedEvent = localStorage.getItem('tiger-selected-event') || 'all';
@@ -1794,12 +1949,27 @@ async function renderMatchPrep() {
   if (!teamMatches.some(match => match.key === selectedKey)) selectedKey = teamMatches[0]?.key || '';
   const match = teamMatches.find(item => item.key === selectedKey);
   const match13Prediction = match ? await fetchMatch13Match(match.key) : null;
-  const projection = team => {
+  const teamProjection = team => {
     const samples = eventRecords.filter(record => String(record.team) === String(team));
-    return samples.length ? samples.reduce((sum, record) => sum + score(record), 0) / samples.length : 0;
+    const points = samples.map(record => score(record));
+    return {
+      predicted:points.length ? points.reduce((sum, value) => sum + value, 0) / points.length : 0,
+      minimum:points.length ? Math.min(...points) : 0,
+      maximum:points.length ? Math.max(...points) : 0
+    };
   };
-  const redProjected = match ? match.red.reduce((sum, team) => sum + projection(team), 0) : 0;
-  const blueProjected = match ? match.blue.reduce((sum, team) => sum + projection(team), 0) : 0;
+  const projection = team => teamProjection(team).predicted;
+  const allianceProjection = alliance => (alliance || []).reduce((summary, team) => {
+    const stats = teamProjection(team);
+    summary.predicted += stats.predicted;
+    summary.minimum += stats.minimum;
+    summary.maximum += stats.maximum;
+    return summary;
+  }, { predicted:0, minimum:0, maximum:0 });
+  const redProjection = match ? allianceProjection(match.red) : allianceProjection([]);
+  const blueProjection = match ? allianceProjection(match.blue) : allianceProjection([]);
+  const redProjected = redProjection.predicted;
+  const blueProjected = blueProjection.predicted;
   const selectedRed = match?.red.includes(selectedTeam);
   const ourScore = selectedRed ? redProjected : blueProjected;
   const opponentScore = selectedRed ? blueProjected : redProjected;
@@ -1811,8 +1981,10 @@ async function renderMatchPrep() {
   try { manual = {...manual, ...JSON.parse(localStorage.getItem('tiger-matchprep-manual') || '{}')}; } catch {}
   manual.ours = [...(manual.ours || []), '', '', ''].slice(0,3);
   manual.opponents = [...(manual.opponents || []), '', '', ''].slice(0,3);
-  const manualOurScore = manual.ours.reduce((sum, team) => sum + projection(team), 0);
-  const manualOpponentScore = manual.opponents.reduce((sum, team) => sum + projection(team), 0);
+  const manualOurProjection = allianceProjection(manual.ours);
+  const manualOpponentProjection = allianceProjection(manual.opponents);
+  const manualOurScore = manualOurProjection.predicted;
+  const manualOpponentScore = manualOpponentProjection.predicted;
   const manualChance = Math.round(100 / (1 + Math.exp(-(manualOurScore - manualOpponentScore) / 18)));
   const manualOutcome = manualChance >= 65 ? 'Likely win' : manualChance <= 35 ? 'Likely loss' : 'Toss-up';
   const manualInputs = (side, values) => values.map((team, index) => `<label>Team ${index + 1}<input data-manual-side="${side}" data-manual-index="${index}" inputmode="numeric" value="${escapeHtml(team)}" placeholder="Team number"></label>`).join('');
@@ -1820,7 +1992,8 @@ async function renderMatchPrep() {
   const manualSnapshot = {
     kind: 'manual', title: 'Manual matchup', event: eventLabel,
     ours: manual.ours, opponents: manual.opponents,
-    ourScore: manualOurScore, opponentScore: manualOpponentScore,
+    ourScore: manualOurScore, ourMin:manualOurProjection.minimum, ourMax:manualOurProjection.maximum,
+    opponentScore: manualOpponentScore, opponentMin:manualOpponentProjection.minimum, opponentMax:manualOpponentProjection.maximum,
     winChance: manualChance, outcome: manualOutcome
   };
   const scheduleSnapshot = match ? {
@@ -1829,16 +2002,22 @@ async function renderMatchPrep() {
     matchNumber: match.number, focusTeam: selectedTeam,
     ours: selectedRed ? match.red : match.blue,
     opponents: selectedRed ? match.blue : match.red,
-    ourScore, opponentScore, winChance, outcome
+    ourScore,
+    ourMin:selectedRed ? redProjection.minimum : blueProjection.minimum,
+    ourMax:selectedRed ? redProjection.maximum : blueProjection.maximum,
+    opponentScore,
+    opponentMin:selectedRed ? blueProjection.minimum : redProjection.minimum,
+    opponentMax:selectedRed ? blueProjection.maximum : redProjection.maximum,
+    winChance, outcome
   } : null;
   const catalog = matchPrepCatalog();
   const shareControls = snapshot => {
     const complete = snapshot && [...snapshot.ours, ...snapshot.opponents].every(Boolean);
-    return `<section class="matchprep-share"><div><p class="eyebrow">OFFLINE HANDOFF</p><h2>Save and share this prep</h2><p>Create a compressed QR packet with this matchup, event details, and the selected event's scouting data for these six teams.</p></div><button id="saveMatchPrep" class="primary" ${complete ? '' : 'disabled'}>Save & build QR packet</button>${complete ? '' : '<small>Enter all six teams to create the handoff.</small>'}</section>`;
+    return `<section class="matchprep-share"><div><p class="eyebrow">OFFLINE HANDOFF</p><h2>Save and share this prep</h2><p>Create one compact QR with score projections and ranges, win probability, auto positions, and team notes.</p></div><button id="saveMatchPrep" class="primary" ${complete ? '' : 'disabled'}>Save & build compact QR</button>${complete ? '' : '<small>Enter all six teams to create the handoff.</small>'}</section>`;
   };
   const catalogMarkup = `<section class="matchprep-catalog">
     <div class="matchprep-catalog-head"><div><p class="eyebrow">SAVED MATCH PREPS</p><h2>${catalog.length} in this device</h2></div><p>Imported QR handoffs and locally saved matchups stay available offline.</p></div>
-    ${catalog.length ? `<div class="matchprep-catalog-grid">${catalog.map(prep => `<article class="matchprep-catalog-card"><div class="catalog-card-head"><div><small>${escapeHtml(prep.event || 'Unspecified event')} · ${new Date(Number(prep.savedAt) || Date.now()).toLocaleString()}</small><h3>${escapeHtml(prep.title || 'Saved matchup')}</h3></div><strong>${Math.round(Number(prep.winChance) || 0)}%</strong></div><div class="catalog-score"><span>${escapeHtml((prep.ours || []).join(' · ') || 'No alliance')}</span><b>${Number(prep.ourScore || 0).toFixed(1)}–${Number(prep.opponentScore || 0).toFixed(1)}</b><span>${escapeHtml((prep.opponents || []).join(' · ') || 'No opponents')}</span></div><p>${escapeHtml(prep.outcome || 'Saved projection')}</p>${prep.packetSummary ? `<p class="packet-summary">${Number(prep.packetSummary.teamCount) || 6} teams · ${Number(prep.packetSummary.recordCount) || 0} scouting records · ${Number(prep.packetSummary.scheduleCount) || 0} schedule entries</p>` : ''}<div class="catalog-actions"><button class="secondary" data-prep-load="${escapeHtml(prep.id)}">Load matchup</button><button class="secondary" data-prep-data="${escapeHtml(prep.id)}">View team data</button><button class="secondary" data-prep-share="${escapeHtml(prep.id)}">Build QR packet</button><button class="catalog-delete" data-prep-delete="${escapeHtml(prep.id)}">Delete</button></div></article>`).join('')}</div>` : '<section class="empty compact-empty"><span>VS</span><h2>No saved match preps</h2><p>Save a scheduled or manual matchup, or scan a Match Prep QR packet on the Scan tab.</p></section>'}
+    ${catalog.length ? `<div class="matchprep-catalog-grid">${catalog.map(prep => `<article class="matchprep-catalog-card"><div class="catalog-card-head"><div><small>${escapeHtml(prep.event || 'Unspecified event')} · ${new Date(Number(prep.savedAt) || Date.now()).toLocaleString()}</small><h3>${escapeHtml(prep.title || 'Saved matchup')}</h3></div><strong>${Math.round(Number(prep.winChance) || 0)}%</strong></div><div class="catalog-score"><span>${escapeHtml((prep.ours || []).join(' · ') || 'No alliance')}</span><div class="catalog-score-center"><b>${Number(prep.ourScore || 0).toFixed(1)}–${Number(prep.opponentScore || 0).toFixed(1)}</b><small>${Number(prep.ourMin || 0).toFixed(0)}–${Number(prep.ourMax || 0).toFixed(0)} · ${Number(prep.opponentMin || 0).toFixed(0)}–${Number(prep.opponentMax || 0).toFixed(0)}</small></div><span>${escapeHtml((prep.opponents || []).join(' · ') || 'No opponents')}</span></div><p>${escapeHtml(prep.outcome || 'Saved projection')}</p>${matchPrepCatalogStrategyMarkup(prep)}${prep.packetSummary ? `<p class="packet-summary">${prep.packetSummary.compact ? 'Compact QR · projections, ranges, probability & strategy' : `${Number(prep.packetSummary.teamCount) || 6} teams · ${Number(prep.packetSummary.recordCount) || 0} scouting records · ${Number(prep.packetSummary.scheduleCount) || 0} schedule entries`}</p>` : ''}<div class="catalog-actions"><button class="secondary" data-prep-load="${escapeHtml(prep.id)}">Load matchup</button><button class="secondary" data-prep-data="${escapeHtml(prep.id)}">View team data</button><button class="secondary" data-prep-share="${escapeHtml(prep.id)}">Build compact QR</button><button class="catalog-delete" data-prep-delete="${escapeHtml(prep.id)}">Delete</button></div></article>`).join('')}</div>` : '<section class="empty compact-empty"><span>VS</span><h2>No saved match preps</h2><p>Save a scheduled or manual matchup, or scan a compact Match Prep QR on the Scan tab.</p></section>'}
   </section>`;
   view.innerHTML = `
     <section class="pagehead matchprep-head"><p class="eyebrow">MATCH READOUT</p><h1>Prepare the next match</h1><p>Compare projected alliance output using this event's scouting averages.</p></section>
@@ -1852,23 +2031,25 @@ async function renderMatchPrep() {
       <div class="manual-alliance opponent-alliance"><p class="eyebrow">OPPONENT ALLIANCE</p>${manualInputs('opponents', manual.opponents)}</div>
     </section>
     <section class="match-readout manual-readout">
-      <div class="win-readout ${manualChance>=65?'favored':manualChance<=35?'underdog':'even'}"><p class="eyebrow">MANUAL PROJECTION</p><strong>${manualChance}%</strong><h2>${manualOutcome}</h2><p>Projected ${manualOurScore.toFixed(1)}–${manualOpponentScore.toFixed(1)} for your alliance.</p></div>
+      <div class="win-readout ${manualChance>=65?'favored':manualChance<=35?'underdog':'even'}"><p class="eyebrow">MANUAL PROJECTION</p><strong>${manualChance}%</strong><h2>${manualOutcome}</h2><p>Projected ${manualOurScore.toFixed(1)}–${manualOpponentScore.toFixed(1)} · ranges ${manualOurProjection.minimum.toFixed(0)}–${manualOurProjection.maximum.toFixed(0)} and ${manualOpponentProjection.minimum.toFixed(0)}–${manualOpponentProjection.maximum.toFixed(0)}.</p></div>
       <div class="alliance-projection our-projection"><div><p class="eyebrow">YOUR ALLIANCE</p><strong>${manualOurScore.toFixed(1)}</strong></div>${manual.ours.map(team => team ? teamCard(team, true) : '<article><span>Team not set</span><strong>0.0</strong><small>projected points</small></article>').join('')}</div>
       <div class="alliance-projection opponent-projection"><div><p class="eyebrow">OPPONENTS</p><strong>${manualOpponentScore.toFixed(1)}</strong></div>${manual.opponents.map(team => team ? teamCard(team, false) : '<article><span>Team not set</span><strong>0.0</strong><small>projected points</small></article>').join('')}</div>
       <p class="projection-note">Enter all six teams above. Projections update from the selected event's scouting records.</p>
-    </section>${shareControls(manualSnapshot)}` : `
+    </section>${matchPrepStrategyMarkup(manualSnapshot)}${shareControls(manualSnapshot)}` : `
     <section class="matchprep-controls">
       <label>Selected team<select id="matchprepTeam">${teams.map(team => `<option value="${escapeHtml(team)}" ${team===selectedTeam?'selected':''}>Team ${escapeHtml(team)}</option>`).join('')}</select></label>
       <label>Next match<select id="matchprepMatch">${teamMatches.map(item => `<option value="${escapeHtml(item.key)}" ${item.key===selectedKey?'selected':''}>Qualification ${item.number}${item.redScore < 0 && item.blueScore < 0 ? ' • upcoming' : ' • played'}</option>`).join('')}</select></label>
     </section>
     ${match ? `<section class="match-readout">
-      <div class="win-readout ${winChance>=65?'favored':winChance<=35?'underdog':'even'}"><p class="eyebrow">QUALIFICATION ${match.number}</p><strong>${winChance}%</strong><h2>${outcome}</h2><p>Projected ${ourScore.toFixed(1)}–${opponentScore.toFixed(1)} for Team ${escapeHtml(selectedTeam)}'s alliance.</p></div>
+      <div class="win-readout ${winChance>=65?'favored':winChance<=35?'underdog':'even'}"><p class="eyebrow">QUALIFICATION ${match.number}</p><strong>${winChance}%</strong><h2>${outcome}</h2><p>Projected ${ourScore.toFixed(1)}–${opponentScore.toFixed(1)} · ranges ${(selectedRed ? redProjection.minimum : blueProjection.minimum).toFixed(0)}–${(selectedRed ? redProjection.maximum : blueProjection.maximum).toFixed(0)} and ${(selectedRed ? blueProjection.minimum : redProjection.minimum).toFixed(0)}–${(selectedRed ? blueProjection.maximum : redProjection.maximum).toFixed(0)}.</p></div>
       ${match13Prediction ? `<div class="match13-prediction"><div><p class="eyebrow">MATCH13 FORECAST</p><h3>${selectedRed ? Math.round(match13Prediction.redWin*100) : Math.round((1-match13Prediction.redWin)*100)}% win chance</h3></div><strong>${selectedRed ? match13Prediction.redScore.toFixed(1) : match13Prediction.blueScore.toFixed(1)}–${selectedRed ? match13Prediction.blueScore.toFixed(1) : match13Prediction.redScore.toFixed(1)}</strong><small>Match13 projected score</small></div>` : ''}
       <div class="alliance-projection red-projection"><div><p class="eyebrow">RED ALLIANCE</p><strong>${redProjected.toFixed(1)}</strong></div>${match.red.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <div class="alliance-projection blue-projection"><div><p class="eyebrow">BLUE ALLIANCE</p><strong>${blueProjected.toFixed(1)}</strong></div>${match.blue.map(team => teamCard(team, team===selectedTeam)).join('')}</div>
       <p class="projection-note">Projection uses average points from locally available scouting records. Teams without records are shown as 0.0 and reduce confidence.</p>
-    </section>${shareControls(scheduleSnapshot)}` : `<section class="empty matchprep-empty"><span>VS</span><h2>No upcoming schedule found</h2><p>Sync the event in Settings with The Blue Alliance to load qualification alliances.</p><button class="primary" data-go="settings">Open settings</button></section>`}`}
+    </section>${matchPrepStrategyMarkup(scheduleSnapshot)}${shareControls(scheduleSnapshot)}` : `<section class="empty matchprep-empty"><span>VS</span><h2>No upcoming schedule found</h2><p>Sync the event in Settings with The Blue Alliance to load qualification alliances.</p><button class="primary" data-go="settings">Open settings</button></section>`}`}
     <section id="matchPrepQrPanel" class="matchprep-qr-panel" hidden></section>`;
+  const activeStrategySnapshot = prepView === 'manual' ? manualSnapshot : prepView === 'schedule' ? scheduleSnapshot : null;
+  wireMatchPrepStrategy(activeStrategySnapshot);
   document.querySelectorAll('[data-prep-view]').forEach(button => button.onclick = () => {
     localStorage.setItem('tiger-matchprep-view', button.dataset.prepView);
     renderMatchPrep();
@@ -1890,7 +2071,7 @@ async function renderMatchPrep() {
   document.querySelector('#saveMatchPrep')?.addEventListener('click', () => {
     const snapshot = prepView === 'manual' ? manualSnapshot : scheduleSnapshot;
     if (!snapshot || ![...snapshot.ours, ...snapshot.opponents].every(Boolean)) return toast('Enter all six teams first.', true);
-    const saved = saveMatchPrepSnapshot(snapshot);
+    const saved = saveMatchPrepSnapshot(attachMatchPrepStrategy(snapshot));
     showMatchPrepQr(saved);
     toast('Match prep saved to the catalog.');
   });
@@ -1902,6 +2083,9 @@ async function renderMatchPrep() {
     const prep = catalog.find(item => item.id === button.dataset.prepLoad);
     if (!prep) return;
     localStorage.setItem('tiger-matchprep-manual', JSON.stringify({ ours: prep.ours, opponents: prep.opponents }));
+    saveMatchPrepStrategy({ kind:'manual', event:prep.event, ours:prep.ours, opponents:prep.opponents }, {
+      selectedTeam:String(prep.ours?.[0] || ''), autoStarts:{ ...(prep.autoStarts || {}) }, teamNotes:{ ...(prep.teamNotes || {}) }
+    });
     localStorage.setItem('tiger-matchprep-view', 'manual');
     renderMatchPrep();
   });

@@ -1,4 +1,4 @@
-const CACHE = 'tiger-scout-v38-readable-matchprep-qr';
+const CACHE = 'tiger-scout-v39-compact-matchprep-strategy';
 const ASSETS = [
   '/', '/index.html', '/public/manifest.webmanifest', '/public/icon.svg', '/public/team-9072-logo.png', '/public/frc-world-championship.webp',
   '/src/main.js', '/src/style.css',

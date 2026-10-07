@@ -12,7 +12,7 @@ assert.match(css, /\.home-landing\{[\s\S]*url\('\/public\/frc-world-championship
 assert.match(css, /min-height:100svh/);
 assert.match(css, /@media\(max-width:700px\)[\s\S]*\.home-landing/);
 assert.ok(image.size > 100_000, 'Championship background image should be a full photographic asset');
-assert.match(worker, /tiger-scout-v38-readable-matchprep-qr/);
+assert.match(worker, /tiger-scout-v39-compact-matchprep-strategy/);
 assert.match(worker, /\/public\/frc-world-championship\.webp/);
 
 console.log('Minimal 9072 World Championship landing page and offline image cache verified.');

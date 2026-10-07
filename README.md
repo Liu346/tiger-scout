@@ -9,6 +9,18 @@ Wi-Fi, cellular data, accounts, or a backend server.
 On Windows, right-click `Start-PitLink.ps1` and choose **Run with PowerShell**.
 It finds an available local port automatically and opens the app there.
 
+For development on a new workstation, install a current Node.js LTS release,
+open this folder in a terminal, then run:
+
+```text
+npm ci
+npm run dev
+```
+
+Use `npm run build` before publishing. Runtime secrets are not stored in this
+repository; configure `TBA_API_KEY`, `MATCH13_API_KEY`, and `SYNC_TOKEN` again in
+the hosting service when moving to a different host.
+
 You can also open `index.html` directly to preview the interface. Use the local
 server for camera scanning and offline installation because browsers restrict
 those features on `file://` pages.
@@ -52,13 +64,25 @@ an existing image. Both routes work without granting continuous live-video acces
 ## Match Prep handoff
 
 Match Prep mode can save either a scheduled match or a six-team manual matchup
-to an offline catalog. A handoff packet includes both alliances, projected
-scores, win chance, event details, relevant schedule entries, cached analytics,
-and every selected-event scouting record for those six teams. Use **Save & build
-QR packet**, then scan every displayed code on the other Tiger Scout device from
-its Scan tab. The receiving device merges the included records into its local
-dataset and adds the prep under **Match Prep → Saved preps**, where **View team
-data** opens the imported event records for deeper review.
+to an offline catalog. Select each team and tap its autonomous starting position
+on the field map, then add a short note for every robot. **Save & build compact
+QR** creates one high-contrast code containing the six team numbers, each
+alliance's predicted/minimum/maximum score, win probability, auto positions, and
+team notes. It deliberately excludes scouting records, schedules, and analytics
+so the code stays easy to scan. The receiving device scans it from the camera or
+a saved image and adds the complete plan under **Match Prep → Saved preps**.
+
+## Move to another workstation
+
+The source ZIP contains the files needed to install, run, test, and publish the
+app. It intentionally excludes `.git`, `node_modules`, generated builds, local
+cache folders, and secret values. After extracting it, run `npm ci` and
+`npm run dev`.
+
+Browser data is separate from the source code. To move scouting records too,
+export a JSON backup from Tiger Scout on the old device and import that backup on
+the new device. Re-enter hosting secrets and any device-local API settings rather
+than copying credential files.
 
 ## CRI 2026 preset
 
@@ -137,8 +161,8 @@ records over. Team photos, downloaded logos, picklists, and preferences remain
 in the old browser store and need to be saved or configured separately. The new
 hosted database begins empty until Commander mode syncs imported records.
 
-Access is private to the Site owner until explicitly shared. Open the new Site
-online and sign in before installing and preparing it for offline use.
+The current Tiger Scout Site is public. Open it online once before installing and
+preparing it for offline use.
 
 ## Alternative direct Cloudflare D1 hosting
 
