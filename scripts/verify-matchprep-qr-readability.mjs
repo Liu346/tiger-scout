@@ -24,6 +24,6 @@ assert.match(styles, /\.auto-start-field/);
 assert.match(styles, /\.matchprep-team-notes/);
 assert.match(styles, /\.matchprep-strategy-layout>\*\{min-width:0\}/);
 assert.match(styles, /\.auto-start-field\{min-height:0;aspect-ratio:1\.7\/1\}/);
-assert.match(worker, /tiger-scout-v39-compact-matchprep-strategy/);
+assert.match(worker, /tiger-scout-v40-prescout-profiles/);
 
 console.log('Compact single-QR Match Prep scores, ranges, probability, strategy map, notes, and legacy import routing verified.');

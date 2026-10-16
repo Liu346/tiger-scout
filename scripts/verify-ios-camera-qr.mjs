@@ -32,6 +32,6 @@ assert.match(source, /wireQrImageInput\(document\.querySelector\('#eventQrCamera
 assert.match(source, /Camera permission is blocked/);
 assert.match(css, /@media\(max-width:520px\)\{\.scanner-controls,\.qr-image-options\{grid-template-columns:1fr\}/);
 assert.match(css, /filter:brightness\(1\.14\) contrast\(1\.18\)/);
-assert.match(worker, /tiger-scout-v39-compact-matchprep-strategy/);
+assert.match(worker, /tiger-scout-v40-prescout-profiles/);
 
 console.log('Full-frame QR scanning, light and dark QR detection, flashlight support, awake screen, image fallback, and mobile layout verified.');

@@ -251,7 +251,7 @@ app.innerHTML = `
       <button data-go="notes" class="notes-nav" data-feature-hidden hidden>Notes</button>
       <button data-go="matchprep" class="matchprep-nav" hidden>Match Prep</button>
       <button data-go="compare" class="compare-nav" data-feature-hidden hidden>Compare</button>
-      <button data-go="prescout" class="prescout-nav" data-feature-hidden hidden>Pre-Scout</button>
+      <button data-go="prescout" class="prescout-nav" hidden>Pre-Scouting</button>
       <button data-go="scan" class="scan-nav">Scan</button>
       <button data-go="editor" class="admin-nav" hidden>Editor</button>
     </nav>
@@ -269,7 +269,7 @@ app.innerHTML = `
     <button data-go="notes" class="notes-nav" data-feature-hidden hidden><span>✎</span>Notes</button>
     <button data-go="matchprep" class="matchprep-nav" hidden><span>VS</span>Prep</button>
     <button data-go="compare" class="compare-nav" data-feature-hidden hidden><span>⇄</span>Compare</button>
-    <button data-go="prescout" class="prescout-nav" data-feature-hidden hidden><span>◫</span>Pre</button>
+    <button data-go="prescout" class="prescout-nav" hidden><span>◫</span>Pre-Scout</button>
     <button data-go="scan" class="scan-nav"><span>⌗</span>Scan</button>
     <button data-go="editor" class="admin-nav" hidden><span>✎</span>Edit</button>
   </nav>
@@ -296,7 +296,8 @@ function applyAppMode() {
   const command = appMode() === 'command';
   document.querySelectorAll('[data-go="scout"]').forEach(element => element.hidden = viewer);
   document.querySelectorAll('.analysis-nav').forEach(element => element.hidden = appMode() === 'scouting' || appMode() === 'notes');
-  document.querySelectorAll('.notes-nav, .compare-nav, .prescout-nav').forEach(element => element.hidden = true);
+  document.querySelectorAll('.notes-nav, .compare-nav').forEach(element => element.hidden = true);
+  document.querySelectorAll('.prescout-nav').forEach(element => element.hidden = !command);
   document.querySelectorAll('.matchprep-nav').forEach(element => element.hidden = appMode() !== 'matchprep' && !command);
   document.querySelectorAll('.scan-nav').forEach(element => element.hidden = appMode() === 'scouting' || appMode() === 'notes');
   document.querySelectorAll('.admin-nav').forEach(element => element.hidden = !command && (!adminUnlocked() || appMode() === 'scouting' || appMode() === 'notes'));
@@ -1469,6 +1470,11 @@ function adminSettingsMarkup() {
 async function renderPreScouting() {
   const allRecords = await records();
   const assetDb = await dbPromise;
+  const profiles = (await assetDb.getAll('assets')).filter(asset => asset.id?.startsWith('robot-profile-'));
+  const profileTeams = [...new Set([...allRecords.map(record => String(record.team)), ...profiles.map(profile => profile.team)])].filter(Boolean).sort((a,b) => a.localeCompare(b, undefined, { numeric:true }));
+  const profileTeam = localStorage.getItem('tiger-prescout-team') || '';
+  const profile = profiles.find(item => item.team === profileTeam) || {};
+  const profilePhoto = profileTeam ? await assetDb.get('assets', `team-photo-${profileTeam}`) : null;
   const currentEvent = localStorage.getItem('tiger-selected-event') || 'all';
   const events = [...new Set(allRecords.map(record => record.event || 'Unspecified event'))].sort();
   const previousEvents = events.filter(event => event !== currentEvent);
@@ -1497,7 +1503,21 @@ async function renderPreScouting() {
     if (photo?.dataUrl) teamPhotos[team.team] = photo.dataUrl;
   }));
   view.innerHTML = `
-    <section class="pagehead prescout-head"><p class="eyebrow">HISTORICAL INTELLIGENCE</p><h1>Pre-scouting</h1><p>Use a previous event as a baseline before new scouting records arrive.</p></section>
+    <section class="pagehead prescout-head"><p class="eyebrow">ROBOT PROFILES</p><h1>Pre-scouting</h1><p>Record robot photos, drivetrains, and weights before the first match. Saved on this device for offline use.</p></section>
+    <form id="robotProfileForm" class="table-card robot-profile-form">
+      <h2>Team robot details</h2>
+      <label>Open saved team<select id="robotProfileSelect"><option value="">New team</option>${profileTeams.map(team => `<option value="${escapeHtml(team)}" ${team===profileTeam?'selected':''}>Team ${escapeHtml(team)}</option>`).join('')}</select></label>
+      <div class="grid">
+        <label>Team number<input name="team" required pattern="[0-9]+[A-Za-z]?" maxlength="12" value="${escapeHtml(profileTeam)}" placeholder="9072" title="Team number, optionally followed by a letter"></label>
+        <label>Drivetrain<select name="drivetrain"><option value="">Not recorded</option>${['Swerve','Tank / differential','Mecanum','Omni / holonomic','Other'].map(type => `<option ${profile.drivetrain===type?'selected':''}>${type}</option>`).join('')}</select></label>
+        <label>Robot weight<input name="weight" type="number" min="0.1" max="1000" step="0.1" value="${profile.weight == null ? '' : Number(profile.weight)}" placeholder="Not recorded"></label>
+        <label>Weight unit<select name="weightUnit"><option value="lb" ${profile.weightUnit!=='kg'?'selected':''}>Pounds (lb)</option><option value="kg" ${profile.weightUnit==='kg'?'selected':''}>Kilograms (kg)</option></select></label>
+      </div>
+      <label>Drivetrain details<textarea name="driveDetails" maxlength="500" rows="2" placeholder="Modules, motors, wheel type…">${escapeHtml(profile.driveDetails || '')}</textarea></label>
+      <label>Weight includes<select name="weightIncludes">${['Not specified','With battery and bumpers','Without battery and bumpers'].map(value => `<option ${profile.weightIncludes===value?'selected':''}>${value}</option>`).join('')}</select></label>
+      <div class="robot-profile-photo">${profilePhoto?.dataUrl ? `<img id="robotProfilePreview" src="${escapeHtml(profilePhoto.dataUrl)}" alt="Team ${escapeHtml(profileTeam)} robot">` : '<img id="robotProfilePreview" alt="Selected robot photo" hidden>'}<label>Take or choose robot photo<input id="robotProfilePhoto" type="file" accept="image/*"></label><small>The photo is shared with this team's Data Readout profile. Choose a new photo to replace it.</small></div>
+      <button class="primary" type="submit">Save robot details</button><p id="robotProfileStatus" role="status"></p>
+    </form>
     <section class="prescout-toolbar">
       <label>Previous event<select id="prescoutEvent">${events.map(event => `<option value="${escapeHtml(event)}" ${event===sourceEvent?'selected':''}>${escapeHtml(event)}</option>`).join('')}</select></label>
       <div><strong>${teams.length}</strong><span>teams</span></div>
@@ -1508,6 +1528,37 @@ async function renderPreScouting() {
       <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Photo</th><th>Team</th><th>Matches</th><th>Avg pts</th><th>Range</th><th>Fuel</th><th>Auto</th><th>Tower</th><th>Reliable</th></tr></thead>
       <tbody>${teams.map((team,index) => `<tr><td>${index+1}</td><td><label class="prescout-photo-button" title="Take or choose a photo for Team ${escapeHtml(team.team)}">${teamPhotos[team.team] ? `<img src="${escapeHtml(teamPhotos[team.team])}" alt="Team ${escapeHtml(team.team)} robot">` : '<span>＋</span>'}<input type="file" accept="image/*" data-prescout-photo="${escapeHtml(team.team)}"></label></td><td><b>${escapeHtml(team.team)}</b></td><td>${team.matches}</td><td><strong>${team.average.toFixed(1)}</strong></td><td>${team.minimum.toFixed(0)}–${team.maximum.toFixed(0)}</td><td>${team.fuel.toFixed(1)}</td><td>${team.auto.toFixed(1)}</td><td>${team.tower.toFixed(1)}</td><td>${Math.round(team.reliability)}%</td></tr>`).join('')}</tbody></table></div>
     </section>` : '<section class="empty"><span>◫</span><h2>No previous-event records</h2><p>Store or import another event to build a pre-scouting baseline.</p></section>'}`;
+  let selectedPhoto;
+  document.querySelector('#robotProfileSelect').onchange = event => {
+    localStorage.setItem('tiger-prescout-team', event.target.value);
+    renderPreScouting();
+  };
+  document.querySelector('#robotProfilePhoto').onchange = async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      selectedPhoto = await resizeTeamPhoto(file);
+      const preview = document.querySelector('#robotProfilePreview');
+      preview.src = selectedPhoto;
+      preview.hidden = false;
+    } catch { toast('Could not read that photo. Choose another image.', true); }
+  };
+  document.querySelector('#robotProfileForm').onsubmit = async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.reportValidity()) return;
+    const values = Object.fromEntries(new FormData(form));
+    const team = values.team.trim().toUpperCase();
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await assetDb.put('assets', { id:`robot-profile-${team}`, team, drivetrain:values.drivetrain, driveDetails:values.driveDetails.trim(), weight:values.weight === '' ? null : Number(values.weight), weightUnit:values.weightUnit, weightIncludes:values.weightIncludes, savedAt:Date.now() });
+      if (selectedPhoto) await assetDb.put('assets', { id:`team-photo-${team}`, team, dataUrl:selectedPhoto, savedAt:Date.now() });
+      localStorage.setItem('tiger-prescout-team', team);
+      await renderPreScouting();
+      document.querySelector('#robotProfileStatus').textContent = `Saved robot details for Team ${team}.`;
+    } catch { toast('Could not save all robot details. Check device storage and try again.', true); button.disabled = false; }
+  };
   document.querySelector('#prescoutEvent')?.addEventListener('change', event => {
     localStorage.setItem('tiger-prescout-event', event.target.value);
     renderPreScouting();
