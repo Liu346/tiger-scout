@@ -89,6 +89,8 @@ const blank = () => ({
   playedDefense: false,
   fouls: 0,
   broke: false,
+  noShow: false,
+  robotNeverMoved: false,
   notes: '',
   createdAt: Date.now()
 });
@@ -310,7 +312,7 @@ function applyAppMode() {
   document.body.classList.toggle('scouting-mode', appMode() === 'scouting');
   document.body.classList.toggle('command-mode', command);
 }
-const score = r => Number(r.autoFuel || 0) + Number(r.teleFuel || 0) +
+const score = r => r.noShow || r.robotNeverMoved ? 0 : Number(r.autoFuel || 0) + Number(r.teleFuel || 0) +
   ({None:0,'Level 1':15}[r.autoTower] || 0) +
   ({None:0,'Level 1':10,'Level 2':20,'Level 3':30}[r.teleTower] || 0);
 
@@ -501,6 +503,16 @@ function updateFuelEstimate(record, phase) {
   record[`${phase}FuelRate`] = fuelRateValue(record[`${phase}FuelRate`]);
   record[`${phase}FuelSeconds`] = fuelSecondsValue(record[`${phase}FuelSeconds`]);
   record[`${phase}Fuel`] = Math.round(record[`${phase}FuelRate`] * record[`${phase}FuelSeconds`]);
+}
+
+function clearScoring(record) {
+  for (const phase of ['auto', 'tele']) {
+    record[`${phase}FuelRate`] = 0;
+    record[`${phase}FuelSeconds`] = 0;
+    record[`${phase}Fuel`] = 0;
+  }
+  record.autoTower = 'None';
+  record.teleTower = 'None';
 }
 
 function fuelFlowControl(phase, label) {
@@ -898,7 +910,10 @@ function renderScout() {
           <label>Fouls observed<input name="fouls" type="number" min="0" value="${draft.fouls}"></label>
           <label class="check"><input name="broke" type="checkbox" ${draft.broke?'checked':''}><span>Robot disabled / broke</span></label>
           <label class="check"><input name="playedDefense" type="checkbox" ${draft.playedDefense?'checked':''}><span>Played defense</span></label>
+          <label class="check"><input name="noShow" type="checkbox" ${draft.noShow?'checked':''}><span>Team did not show</span></label>
+          <label class="check"><input name="robotNeverMoved" type="checkbox" ${draft.robotNeverMoved?'checked':''}><span>Robot never moved / did not operate</span></label>
         </div>
+        <p id="zeroScoreNotice" class="sync-status" role="status" hidden>This match will be recorded as 0 points. FUEL and TOWER scoring are set to zero.</p>
         <label>Notes<textarea name="notes" rows="3" maxlength="240" placeholder="Speed, consistency, driver skill…">${escapeHtml(draft.notes)}</textarea></label>
       </fieldset>
       <button class="primary wide" type="submit">Save & create QR <b>→</b></button>
@@ -913,6 +928,28 @@ function renderScout() {
     if (['event','match','team','alliance'].includes(input.name)) localStorage.removeItem('tiger-pending-scout-assignment');
     if (input.name && !/^(auto|tele)Fuel/.test(input.name)) draft[input.name] = input.type === 'checkbox' ? input.checked : input.value;
   });
+  const updateZeroScoreState = () => {
+    const form = document.querySelector('#scoutForm');
+    const zeroScore = form.elements.noShow.checked || form.elements.robotNeverMoved.checked;
+    draft.noShow = form.elements.noShow.checked;
+    draft.robotNeverMoved = form.elements.robotNeverMoved.checked;
+    if (zeroScore) clearScoring(draft);
+    form.querySelectorAll('.fuel-flow input').forEach(input => {
+      input.disabled = zeroScore;
+      if (zeroScore) input.value = '0';
+    });
+    for (const name of ['autoTower', 'teleTower']) {
+      const select = form.elements[name];
+      select.disabled = zeroScore;
+      if (zeroScore) select.value = 'None';
+    }
+    form.querySelector('#zeroScoreNotice').hidden = !zeroScore;
+    for (const phase of ['auto', 'tele']) updateFuelFlowControl(phase);
+  };
+  document.querySelector('#scoutForm').addEventListener('change', event => {
+    if (['noShow', 'robotNeverMoved'].includes(event.target.name)) updateZeroScoreState();
+  });
+  updateZeroScoreState();
   document.querySelector('[name="event"]').addEventListener('change', event => {
     localStorage.removeItem('tiger-pending-scout-assignment');
     localStorage.setItem('tiger-selected-event', event.target.value);
@@ -955,9 +992,14 @@ async function saveScout(e) {
   draft.bump = fd.has('bump');
   draft.broke = fd.has('broke');
   draft.playedDefense = fd.has('playedDefense');
+  draft.noShow = fd.has('noShow');
+  draft.robotNeverMoved = fd.has('robotNeverMoved');
+  if (draft.noShow || draft.robotNeverMoved) clearScoring(draft);
   for (const phase of ['auto', 'tele']) {
-    draft[`${phase}FuelRate`] = fd.get(`${phase}FuelRate`);
-    draft[`${phase}FuelSeconds`] = fd.get(`${phase}FuelSeconds`);
+    if (!draft.noShow && !draft.robotNeverMoved) {
+      draft[`${phase}FuelRate`] = fd.get(`${phase}FuelRate`);
+      draft[`${phase}FuelSeconds`] = fd.get(`${phase}FuelSeconds`);
+    }
     updateFuelEstimate(draft, phase);
     if (draft[`${phase}FuelRate`] > 0 && draft[`${phase}FuelSeconds`] === 0) {
       toast('Enter seconds spent scoring for each nonzero flow rate.', true);
@@ -3125,7 +3167,7 @@ async function showTeam(team, rs) {
     <section class="match-grid">${sorted.map(r=>`
       <article><div><span>Match ${escapeHtml(r.match)}</span><b>${score(r)} pts</b></div>
       <dl>${fuelMatchReadout(r, 'auto', 'AUTO')}${fuelMatchReadout(r, 'tele', 'TELEOP')}<dt>AUTO TOWER</dt><dd>${r.autoTower || 'None'}</dd><dt>ENDGAME TOWER</dt><dd>${r.teleTower || 'None'}</dd>${r.tbaEndgameTower != null?`<dt>TBA VERIFIED</dt><dd class="verified">✓ ${escapeHtml(r.tbaEndgameTower)}</dd>`:''}<dt>Defense rating</dt><dd>${r.defense}/5</dd><dt>Played defense</dt><dd>${typeof r.playedDefense === 'boolean' ? (r.playedDefense ? 'Yes' : 'No') : 'Not recorded'}</dd><dt>Field access</dt><dd>${[r.trench?'Trench':'',r.bump?'Bump':''].filter(Boolean).join(' + ') || 'Standard'}</dd></dl>
-      ${r.broke?'<p class="warning">⚠ Robot disabled</p>':''}${r.notes?`<p class="notes">“${escapeHtml(r.notes)}”</p>`:''}</article>`).join('')}</section>`;
+      ${r.noShow?'<p class="warning">Team did not show · recorded as 0 points</p>':''}${r.robotNeverMoved?'<p class="warning">Robot never moved · recorded as 0 points</p>':''}${r.broke?'<p class="warning">⚠ Robot disabled</p>':''}${r.notes?`<p class="notes">“${escapeHtml(r.notes)}”</p>`:''}</article>`).join('')}</section>`;
   document.querySelector('#teamPhotoInput').onchange = async event => {
     const file = event.target.files?.[0];
     if (!file) return;
